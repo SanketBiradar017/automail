@@ -1,0 +1,20 @@
+[project]
+name = "mailgenie-ai"
+version = "0.1.0"
+description = "AI-powered Gmail email automation using Gemini and FastAPI"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "python-dotenv",
+    "google-api-python-client",
+    "google-auth",
+    "google-auth-oauthlib",
+    "google-auth-httplib2",
+    "langchain-google-genai",
+    "jinja2"
+]
+
+[tool.uv]
+package = false

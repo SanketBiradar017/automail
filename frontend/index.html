@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1.0">
+
+    <title>AutoMail AI</title>
+    
+
+    <link rel="stylesheet" href="/static/style.css">
+
+</head>
+
+<body>
+
+    <div class="background"></div>
+
+    <header>
+
+        <div class="logo">
+            <span class="logo-mark">✦</span>
+            AutoMail AI
+        </div>
+
+        <div class="status" id="senderStatus">
+            <span id="senderDot"></span>
+            <span id="senderText">Checking sender account...</span>
+            <button
+                id="connectBtn"
+                class="connect-btn"
+                onclick="connectSender()"
+                style="display: none;"
+            >
+                Connect Gmail
+            </button>
+        </div>
+
+    </header>
+
+
+    <main>
+
+        <section class="hero">
+
+            <div class="badge">
+                ✦ Powered by Gemini AI
+            </div>
+
+            <h1>
+                Write smarter.
+                <br>
+                <span>Send faster.</span>
+            </h1>
+
+            <p>
+                Generate professional emails with AI
+                and send them directly through Gmail.
+            </p>
+
+        </section>
+
+
+        <section class="card">
+
+            <div class="screen active" id="screenForm">
+
+                <h2>Create Email</h2>
+
+                <p class="subtitle">
+                    Tell AI what you want to communicate.
+                </p>
+
+
+                <label for="recipient">Recipient Email</label>
+
+                <input
+                    id="recipient"
+                    type="email"
+                    placeholder="john@example.com"
+                    autocomplete="off"
+                >
+                <p class="field-hint" id="recipientHint"></p>
+
+
+                <label for="recipientName">Recipient Name</label>
+
+                <input
+                    id="recipientName"
+                    type="text"
+                    placeholder="John"
+                    autocomplete="off"
+                >
+
+
+                <label for="subject">Subject</label>
+
+                <input
+                    id="subject"
+                    type="text"
+                    placeholder="Project Meeting"
+                    autocomplete="off"
+                >
+
+
+                <label for="context">
+                    Additional Context
+                    <span class="char-counter" id="contextCounter">0 / 600</span>
+                </label>
+
+                <textarea
+                    id="context"
+                    placeholder="Explain what you want to communicate..."
+                    maxlength="600"
+                ></textarea>
+
+
+                <button
+                    id="generateBtn"
+                    onclick="generateEmail()"
+                >
+                    <span class="btn-label">✦ Generate Email</span>
+                </button>
+
+            </div>
+
+
+            <div class="screen" id="screenPreview">
+
+                <button class="back-link" onclick="showScreen('form')">
+                    ← Edit details
+                </button>
+
+                <div class="preview-header">
+
+                    <div>
+                        <h2>AI Preview</h2>
+
+                        <p class="subtitle">
+                            Your generated email
+                        </p>
+                    </div>
+
+                    <span class="ai-badge">
+                        GEMINI
+                    </span>
+
+                </div>
+
+
+                <div class="preview-wrapper">
+
+                    <textarea
+                        id="emailPreview"
+                        class="email-preview"
+                        disabled
+                    ></textarea>
+
+                    <div class="empty-state" id="previewEmptyState">
+
+                        <div class="empty-icon">✦</div>
+
+                        <h3>Your email will appear here</h3>
+
+                        <p>Fill in the details and let AI write your email.</p>
+
+                    </div>
+
+                </div>
+
+
+                <div class="actions">
+
+                    <button
+                        id="copyBtn"
+                        class="secondary"
+                        onclick="copyEmail()"
+                        disabled
+                    >
+                        Copy
+                    </button>
+
+                    <button
+                        id="sendBtn"
+                        class="send"
+                        onclick="sendEmail()"
+                        disabled
+                    >
+                        <span class="btn-label">Send via Gmail</span>
+                    </button>
+
+                </div>
+
+            </div>
+
+
+            <div class="screen" id="screenSuccess">
+
+                <div class="success-content">
+
+                    <div class="success-icon">✓</div>
+
+                    <h2>Email sent successfully!</h2>
+
+                    <p class="subtitle" id="successSubtitle">
+                        Your message is on its way.
+                    </p>
+
+                    <button
+                        id="newEmailBtn"
+                        class="send"
+                        onclick="startNewEmail()"
+                    >
+                        <span class="btn-label">✦ Send Another Email</span>
+                    </button>
+
+                </div>
+
+            </div>
+
+        </section>
+
+    </main>
+
+
+    <footer>
+
+        <p>
+            AutoMail AI · Built with FastAPI + Gemini + Gmail API
+        </p>
+
+    </footer>
+
+
+    <div class="toast-container" id="toastContainer"></div>
+
+
+    <script src="/static/app.js"></script>
+
+</body>
+
+</html>
