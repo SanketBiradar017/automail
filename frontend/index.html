@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1.0">
+
+    <title>AutoMail AI</title>
+    
+
+    <link rel="stylesheet" href="/static/style.css?v=15">
+
+</head>
+
+<body>
+
+    <div class="background"></div>
+
+    <header>
+
+        <div class="logo">
+            <span class="logo-mark">✦</span>
+            AutoMail AI
+        </div>
+
+        <nav class="nav-menu">
+            <button class="nav-btn active" type="button">
+                ✦ Compose
+            </button>
+            <button class="nav-btn" type="button">
+                📨 Bulk
+            </button>
+            <button class="nav-btn" type="button">
+                📧 History
+            </button>
+            <button class="nav-btn" type="button">
+                🗓 Schedule
+            </button>
+            <button class="nav-btn" type="button">
+                🔁 Follow-ups
+            </button>
+        </nav>
+
+        <div class="status" id="senderStatus">
+            <span id="senderDot"></span>
+            <span id="senderText">Checking sender account...</span>
+            <button
+                id="connectBtn"
+                class="connect-btn"
+                onclick="connectSender()"
+                style="display: none;"
+            >
+                Connect Gmail
+            </button>
+        </div>
+
+    </header>
+
+
+    <main>
+
+        <section class="hero">
+
+            <div class="badge">
+                ✦ Powered by Gemini AI
+            </div>
+
+            <h1>
+                Write smarter.
+                <br>
+                <span>Send faster.</span>
+            </h1>
+
+            <p>
+                Generate professional emails with AI
+                and send them directly through Gmail.
+            </p>
+
+        </section>
+
+
+        <section class="card">
+
+            <div class="screen active" id="screenForm">
+
+                <h2>Create Email</h2>
+
+                <p class="subtitle">
+                    Tell AI what you want to communicate.
+                </p>
+
+
+                <label for="recipient">Recipient Email</label>
+
+                <input
+                    id="recipient"
+                    type="email"
+                    placeholder="john@example.com"
+                    autocomplete="off"
+                >
+                <p class="field-hint" id="recipientHint"></p>
+
+
+                <label for="recipientName">Recipient Name</label>
+
+                <input
+                    id="recipientName"
+                    type="text"
+                    placeholder="John"
+                    autocomplete="off"
+                >
+
+                <button
+                    type="button"
+                    class="link-toggle"
+                    id="ccBccToggle"
+                    onclick="toggleCcBcc()"
+                >
+                    + Add CC / BCC
+                </button>
+
+                <div id="ccBccFields" class="cc-bcc-fields" style="display: none;">
+
+                    <label for="ccInput">CC <span class="optional-tag">(optional)</span></label>
+                    <input
+                        id="ccInput"
+                        type="text"
+                        placeholder="cc1@example.com, cc2@example.com"
+                        autocomplete="off"
+                    >
+
+                    <label for="bccInput">BCC <span class="optional-tag">(optional)</span></label>
+                    <input
+                        id="bccInput"
+                        type="text"
+                        placeholder="bcc1@example.com, bcc2@example.com"
+                        autocomplete="off"
+                    >
+
+                </div>
+
+
+                <label for="subject">Subject</label>
+
+                <input
+                    id="subject"
+                    type="text"
+                    placeholder="Project Meeting"
+                    autocomplete="off"
+                >
+
+
+                <label for="context">
+                    Additional Context
+                    <span class="char-counter" id="contextCounter">0 / 600</span>
+                </label>
+
+                <textarea
+                    id="context"
+                    placeholder="Explain what you want to communicate..."
+                    maxlength="600"
+                ></textarea>
+
+
+                <button
+                    id="generateBtn"
+                    onclick="generateEmail()"
+                >
+                    <span class="btn-label">✦ Generate Email</span>
+                </button>
+
+            </div>
+
+
+            <div class="screen" id="screenPreview">
+
+                <button class="back-link" onclick="showScreen('form')">
+                    ← Edit details
+                </button>
+
+                <div class="preview-header">
+
+                    <div>
+                        <h2>AI Preview</h2>
+
+                        <p class="subtitle">
+                            Your generated email
+                        </p>
+                    </div>
+
+                    <span class="ai-badge">
+                        GEMINI
+                    </span>
+
+                </div>
+
+
+                <div class="preview-wrapper">
+
+                    <textarea
+                        id="emailPreview"
+                        class="email-preview"
+                        disabled
+                    ></textarea>
+
+                    <div class="empty-state" id="previewEmptyState">
+
+                        <div class="empty-icon">✦</div>
+
+                        <h3>Your email will appear here</h3>
+
+                        <p>Fill in the details and let AI write your email.</p>
+
+                    </div>
+
+                </div>
+
+
+                <label for="attachmentsInput">
+                    Attachments <span class="optional-tag">(optional)</span>
+                </label>
+
+                <div class="file-input-wrapper">
+                    <input
+                        id="attachmentsInput"
+                        type="file"
+                        multiple
+                        onchange="handleAttachmentsChange()"
+                    >
+                    <label for="attachmentsInput" class="file-label">
+                        📎 Attach files
+                    </label>
+                </div>
+
+                <div id="attachmentsList" class="attachments-list"></div>
+
+
+                <label class="checkbox-label">
+                    <input type="checkbox" id="composeFollowupToggle" onchange="toggleFollowupFields('compose')">
+                    Enable automatic follow-ups
+                </label>
+
+                <div id="composeFollowupFields" class="followup-fields" style="display: none;">
+                    <div class="followup-fields-row">
+                        <div>
+                            <label for="composeFollowupWait">Wait before 1st follow-up</label>
+                            <div class="duration-input">
+                                <input id="composeFollowupWait" type="number" min="1" value="48">
+                                <select id="composeFollowupWaitUnit">
+                                    <option value="hours" selected>Hours</option>
+                                    <option value="days">Days</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div>
+                            <label for="composeFollowupMax">Max follow-ups</label>
+                            <input id="composeFollowupMax" type="number" min="1" max="10" value="2">
+                        </div>
+                        <div>
+                            <label for="composeFollowupInterval">Interval between</label>
+                            <div class="duration-input">
+                                <input id="composeFollowupInterval" type="number" min="1" value="72">
+                                <select id="composeFollowupIntervalUnit">
+                                    <option value="hours" selected>Hours</option>
+                                    <option value="days">Days</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    <p class="field-hint">Stops automatically as soon as the recipient replies.</p>
+                </div>
+
+
+                <div class="actions">
+
+                    <button
+                        id="copyBtn"
+                        class="secondary"
+                        onclick="copyEmail()"
+                        disabled
+                    >
+                        Copy
+                    </button>
+
+                    <button
+                        id="sendBtn"
+                        class="send"
+                        onclick="sendEmail()"
+                        disabled
+                    >
+                        <span class="btn-label">Send via Gmail</span>
+                    </button>
+
+                </div>
+
+            </div>
+
+
+            <div class="screen" id="screenSuccess">
+
+                <div class="success-content">
+
+                    <div class="success-icon">✓</div>
+
+                    <h2>Email sent successfully!</h2>
+
+                    <p class="subtitle" id="successSubtitle">
+                        Your message is on its way.
+                    </p>
+
+                    <button
+                        id="newEmailBtn"
+                        class="send"
+                        onclick="startNewEmail()"
+                    >
+                        <span class="btn-label">✦ Send Another Email</span>
+                    </button>
+
+                </div>
+
+            </div>
+
+
+            <div class="screen" id="screenBulk">
+
+                <h2>Send Bulk Emails</h2>
+
+                <p class="subtitle">
+                    Send the same email to multiple recipients at once.
+                </p>
+
+
+                <label for="campaignName">Campaign Name</label>
+
+                <input
+                    id="campaignName"
+                    type="text"
+                    placeholder="Newsletter October 2026"
+                    autocomplete="off"
+                >
+
+
+                <label for="bulkSubject">Subject</label>
+
+                <input
+                    id="bulkSubject"
+                    type="text"
+                    placeholder="Monthly Newsletter"
+                    autocomplete="off"
+                >
+
+
+                <label for="bulkBody" class="label-with-action">
+                    <span>Email Body</span>
+                    <button
+                        type="button"
+                        class="inline-generate-btn"
+                        id="bulkGenerateBtn"
+                        onclick="generateBulkEmail()"
+                    >
+                        <span class="btn-label">✦ Generate with AI</span>
+                    </button>
+                </label>
+
+                <textarea
+                    id="bulkBody"
+                    placeholder="Hi {name}, here's this month's update... (or type a quick description and click Generate)"
+                ></textarea>
+
+                <p class="field-hint">Use {name} to insert recipient's name. Type your own text, or type a quick description and click Generate to let AI expand it.</p>
+
+
+                <label for="emailListInput">
+                    Recipients
+                    <span class="char-counter" id="recipientCounter">0 emails</span>
+                </label>
+
+                <div class="bulk-input-tabs">
+                    <button class="bulk-tab-btn active" onclick="switchBulkInputMode('paste')">
+                        Paste
+                    </button>
+                    <button class="bulk-tab-btn" onclick="switchBulkInputMode('csv')">
+                        CSV Upload
+                    </button>
+                </div>
+
+                <div id="pasteMode" class="bulk-input-mode">
+                    <textarea
+                        id="emailListInput"
+                        class="email-list-input"
+                        placeholder="Paste emails (one per line)&#10;john@example.com&#10;alice@example.com&#10;&#10;Or with names (format: email,name):&#10;john@example.com,John Doe&#10;alice@example.com,Alice Smith"
+                    ></textarea>
+                </div>
+
+                <div id="csvMode" class="bulk-input-mode" style="display: none;">
+                    <div class="file-input-wrapper">
+                        <input
+                            id="csvFile"
+                            type="file"
+                            accept=".csv"
+                            onchange="handleCsvUpload()"
+                        >
+                        <label for="csvFile" class="file-label">
+                            📁 Choose CSV file (email,name columns)
+                        </label>
+                    </div>
+                    <p class="field-hint">CSV should have columns: email, name</p>
+                </div>
+
+
+                <label for="bulkAttachmentsInput">
+                    Attachments <span class="optional-tag">(optional, sent with every email)</span>
+                </label>
+
+                <div class="file-input-wrapper">
+                    <input
+                        id="bulkAttachmentsInput"
+                        type="file"
+                        multiple
+                        onchange="handleBulkAttachmentsChange()"
+                    >
+                    <label for="bulkAttachmentsInput" class="file-label">
+                        📎 Attach files
+                    </label>
+                </div>
+
+                <div id="bulkAttachmentsList" class="attachments-list"></div>
+
+
+                <div class="bulk-actions">
+                    <button
+                        id="validateBtn"
+                        class="secondary"
+                        onclick="validateBulkEmails()"
+                    >
+                        Validate
+                    </button>
+
+                    <button
+                        id="sendBulkBtn"
+                        class="send"
+                        onclick="sendBulkEmails()"
+                    >
+                        <span class="btn-label">📨 Send All</span>
+                    </button>
+                </div>
+
+                <div id="bulkResults" class="bulk-results" style="display: none;">
+                    <div class="results-header">
+                        <h3>Send Results</h3>
+                    </div>
+                    <div id="resultsList" class="results-list"></div>
+                </div>
+
+            </div>
+
+
+            <div class="screen" id="screenHistory">
+
+                <div class="history-header">
+                    <h2>Email History</h2>
+                    <p class="subtitle">View and manage your sent emails</p>
+                </div>
+
+                <div class="campaigns-list" id="campaignsList">
+                    <div class="empty-state">
+                        <div class="empty-icon">📧</div>
+                        <h3>No campaigns yet</h3>
+                        <p>Emails you send will appear here.</p>
+                    </div>
+                </div>
+
+            </div>
+
+
+            <div class="screen" id="screenSchedule">
+
+                <div class="history-header">
+                    <h2>Email Scheduling</h2>
+                    <p class="subtitle">Schedule, manage and automate your emails</p>
+                </div>
+
+                <div class="schedule-toolbar">
+                    <div class="schedule-status-tabs" id="scheduleStatusTabs">
+                        <button class="status-tab-btn active" data-status="">All</button>
+                        <button class="status-tab-btn" data-status="scheduled">Scheduled</button>
+                        <button class="status-tab-btn" data-status="pending">Pending</button>
+                        <button class="status-tab-btn" data-status="sent">Sent</button>
+                        <button class="status-tab-btn" data-status="failed">Failed</button>
+                        <button class="status-tab-btn" data-status="cancelled">Cancelled</button>
+                        <button class="status-tab-btn" data-status="draft">Drafts</button>
+                    </div>
+
+                    <div class="schedule-toolbar-actions">
+                        <div class="view-toggle">
+                            <button class="view-toggle-btn active" id="scheduleViewListBtn" onclick="setScheduleView('list')">☰ List</button>
+                            <button class="view-toggle-btn" id="scheduleViewCalendarBtn" onclick="setScheduleView('calendar')">🗓 Calendar</button>
+                        </div>
+                        <button class="send" id="newScheduleBtn" onclick="openScheduleForm()">+ New Scheduled Email</button>
+                    </div>
+                </div>
+
+                <div id="scheduleListView" class="schedule-list-view">
+                    <div class="schedule-list" id="scheduleList">
+                        <div class="empty-state">
+                            <div class="empty-icon">🗓</div>
+                            <h3>No scheduled emails</h3>
+                            <p>Emails you schedule will appear here.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="scheduleCalendarView" class="schedule-calendar-view" style="display: none;">
+                    <div class="calendar-header">
+                        <button class="calendar-nav-btn" onclick="shiftCalendarMonth(-1)">←</button>
+                        <h3 id="calendarMonthLabel"></h3>
+                        <button class="calendar-nav-btn" onclick="shiftCalendarMonth(1)">→</button>
+                    </div>
+                    <div class="calendar-grid" id="calendarGrid"></div>
+                    <div id="calendarDayDetail" class="calendar-day-detail" style="display: none;"></div>
+                </div>
+
+            </div>
+
+
+            <div class="screen" id="screenFollowups">
+
+                <div class="history-header">
+                    <h2>Follow-up Automation</h2>
+                    <p class="subtitle">Automatic nudges for emails that haven't gotten a reply</p>
+                </div>
+
+                <div class="schedule-toolbar">
+                    <div class="schedule-status-tabs" id="followupStatusTabs">
+                        <button class="status-tab-btn active" data-status="">All</button>
+                        <button class="status-tab-btn" data-status="waiting">Waiting</button>
+                        <button class="status-tab-btn" data-status="due">Due</button>
+                        <button class="status-tab-btn" data-status="sent">Sent</button>
+                        <button class="status-tab-btn" data-status="replied">Replied</button>
+                        <button class="status-tab-btn" data-status="stopped">Stopped</button>
+                        <button class="status-tab-btn" data-status="failed">Failed</button>
+                        <button class="status-tab-btn" data-status="cancelled">Cancelled</button>
+                    </div>
+                </div>
+
+                <div class="schedule-list" id="followupList">
+                    <div class="empty-state">
+                        <div class="empty-icon">🔁</div>
+                        <h3>No follow-up automations yet</h3>
+                        <p>Enable follow-ups when composing or scheduling an email to see them here.</p>
+                    </div>
+                </div>
+
+            </div>
+
+        </section>
+
+    </main>
+
+
+    <div id="scheduleFormOverlay" class="schedule-form-overlay" style="display: none;">
+        <div class="schedule-form-panel">
+
+            <div class="schedule-form-header">
+                <h3 id="scheduleFormTitle">New Scheduled Email</h3>
+                <button type="button" class="close-btn" onclick="closeScheduleForm()">✕</button>
+            </div>
+
+            <label for="scheduleRecipient">Recipient Email</label>
+            <input id="scheduleRecipient" type="email" placeholder="john@example.com" autocomplete="off">
+
+            <label for="scheduleRecipientName">Recipient Name</label>
+            <input id="scheduleRecipientName" type="text" placeholder="John" autocomplete="off">
+
+            <button type="button" class="link-toggle" id="scheduleCcBccToggle" onclick="toggleScheduleCcBcc()">
+                + Add CC / BCC
+            </button>
+
+            <div id="scheduleCcBccFields" class="cc-bcc-fields" style="display: none;">
+                <label for="scheduleCc">CC <span class="optional-tag">(optional)</span></label>
+                <input id="scheduleCc" type="text" placeholder="cc1@example.com, cc2@example.com" autocomplete="off">
+
+                <label for="scheduleBcc">BCC <span class="optional-tag">(optional)</span></label>
+                <input id="scheduleBcc" type="text" placeholder="bcc1@example.com, bcc2@example.com" autocomplete="off">
+            </div>
+
+            <label for="scheduleSubject">Subject</label>
+            <input id="scheduleSubject" type="text" placeholder="Project Meeting" autocomplete="off">
+
+            <label for="scheduleBody" class="label-with-action">
+                <span>Email Body</span>
+                <button type="button" class="inline-generate-btn" id="scheduleGenerateBtn" onclick="generateScheduleEmail()">
+                    <span class="btn-label">✦ Generate with AI</span>
+                </button>
+            </label>
+            <textarea id="scheduleBody" placeholder="Write your email... (or type a quick description and click Generate)"></textarea>
+            <p class="field-hint">Type your own text, or type a quick description and click Generate to let AI expand it.</p>
+
+            <label for="scheduleAttachmentsInput">
+                Attachments <span class="optional-tag">(optional)</span>
+            </label>
+            <div class="file-input-wrapper">
+                <input id="scheduleAttachmentsInput" type="file" multiple onchange="handleScheduleAttachmentsChange()">
+                <label for="scheduleAttachmentsInput" class="file-label">📎 Attach files</label>
+            </div>
+            <div id="scheduleAttachmentsList" class="attachments-list"></div>
+
+            <div class="schedule-datetime-row">
+                <div>
+                    <label for="scheduleDateTime">Date &amp; Time</label>
+                    <input id="scheduleDateTime" type="datetime-local">
+                </div>
+                <div>
+                    <label for="scheduleTimezone">Timezone</label>
+                    <select id="scheduleTimezone"></select>
+                </div>
+            </div>
+
+            <label for="recurrenceType">Repeat</label>
+            <select id="recurrenceType" onchange="handleRecurrenceTypeChange()">
+                <option value="none">Does not repeat</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+                <option value="custom">Custom (every N days)</option>
+            </select>
+
+            <div id="recurrenceCustomFields" style="display: none;">
+                <label for="recurrenceIntervalDays">Repeat every</label>
+                <input id="recurrenceIntervalDays" type="number" min="1" value="2" placeholder="Number of days">
+            </div>
+
+            <div id="recurrenceEndFields" style="display: none;">
+                <label for="recurrenceEndDate">Ends on <span class="optional-tag">(optional)</span></label>
+                <input id="recurrenceEndDate" type="date">
+            </div>
+
+            <label class="checkbox-label">
+                <input type="checkbox" id="scheduleFollowupToggle" onchange="toggleFollowupFields('schedule')">
+                Enable automatic follow-ups
+            </label>
+
+            <div id="scheduleFollowupFields" class="followup-fields" style="display: none;">
+                <div class="followup-fields-row">
+                    <div>
+                        <label for="scheduleFollowupWait">Wait before 1st follow-up</label>
+                        <div class="duration-input">
+                            <input id="scheduleFollowupWait" type="number" min="1" value="48">
+                            <select id="scheduleFollowupWaitUnit">
+                                <option value="hours" selected>Hours</option>
+                                <option value="days">Days</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div>
+                        <label for="scheduleFollowupMax">Max follow-ups</label>
+                        <input id="scheduleFollowupMax" type="number" min="1" max="10" value="2">
+                    </div>
+                    <div>
+                        <label for="scheduleFollowupInterval">Interval between</label>
+                        <div class="duration-input">
+                            <input id="scheduleFollowupInterval" type="number" min="1" value="72">
+                            <select id="scheduleFollowupIntervalUnit">
+                                <option value="hours" selected>Hours</option>
+                                <option value="days">Days</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <p class="field-hint">Stops automatically as soon as the recipient replies.</p>
+            </div>
+
+            <div class="schedule-form-actions">
+                <button type="button" class="secondary" onclick="saveScheduleForm(true)">Save as Draft</button>
+                <button type="button" class="send" id="scheduleSubmitBtn" onclick="saveScheduleForm(false)">
+                    <span class="btn-label">🗓 Schedule Email</span>
+                </button>
+            </div>
+
+        </div>
+    </div>
+
+
+    <div id="followupEditOverlay" class="schedule-form-overlay" style="display: none;">
+        <div class="schedule-form-panel">
+
+            <div class="schedule-form-header">
+                <h3>Edit Follow-up Automation</h3>
+                <button type="button" class="close-btn" onclick="closeFollowupEdit()">✕</button>
+            </div>
+
+            <label for="followupEditWait">Wait before 1st follow-up</label>
+            <div class="duration-input">
+                <input id="followupEditWait" type="number" min="1">
+                <select id="followupEditWaitUnit">
+                    <option value="hours" selected>Hours</option>
+                    <option value="days">Days</option>
+                </select>
+            </div>
+
+            <label for="followupEditMax">Max follow-ups</label>
+            <input id="followupEditMax" type="number" min="1" max="10">
+
+            <label for="followupEditInterval">Interval between</label>
+            <div class="duration-input">
+                <input id="followupEditInterval" type="number" min="1">
+                <select id="followupEditIntervalUnit">
+                    <option value="hours" selected>Hours</option>
+                    <option value="days">Days</option>
+                </select>
+            </div>
+
+            <div class="schedule-form-actions">
+                <button type="button" class="send" id="followupEditSaveBtn" onclick="saveFollowupEdit()">
+                    <span class="btn-label">Save Changes</span>
+                </button>
+            </div>
+
+        </div>
+    </div>
+
+
+    <footer>
+
+        <p>
+            AutoMail AI · Built with FastAPI + Gemini + Gmail API
+        </p>
+
+    </footer>
+
+
+    <div class="toast-container" id="toastContainer"></div>
+
+
+    <script src="/static/app.js?v=15"></script>
+
+</body>
+
+</html>

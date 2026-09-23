@@ -1,0 +1,9 @@
+(AutoMail AI – Intelligent Email Automation System) :~/my_project/AutoMail AI – Intelligent Email Automation System$ 
+
+front end   
+~/my_project/AutoMail AI – Intelligent Email Automation System/frontend$       python3 -m http.server 5500
+
+
+backend 
+
+:~/my_project/AutoMail AI – Intelligent Email Automation System$              uvicorn backend.main:app --reload
