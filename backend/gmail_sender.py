@@ -8,7 +8,6 @@ from typing import List, Dict, Optional
 
 from google.auth.exceptions import RefreshError
 
-from backend.config import SENDER_EMAIL
 from backend.gmail_auth import get_gmail_service, SenderNotAuthenticatedError
 
 
@@ -52,6 +51,7 @@ def _build_message(
 
 
 def send_email(
+    sender_email: str,
     recipient: str,
     subject: str,
     body: str,
@@ -60,12 +60,9 @@ def send_email(
     attachments: Optional[List[Dict[str, str]]] = None
 ):
 
-    if not SENDER_EMAIL:
-        raise ValueError("SENDER_EMAIL is missing from .env")
-
     # allow_oauth=False: sending must never block on an interactive OAuth
-    # flow. The sender account is connected explicitly via /connect-sender.
-    service, _ = get_gmail_service(SENDER_EMAIL, allow_oauth=False)
+    # flow. Accounts are connected explicitly via the Gmail account manager.
+    service, _ = get_gmail_service(sender_email, allow_oauth=False)
 
     message = _build_message(recipient, subject, body, cc, bcc, attachments)
 
@@ -83,13 +80,14 @@ def send_email(
 
     except RefreshError as exc:
         raise SenderNotAuthenticatedError(
-            f"Gmail account '{SENDER_EMAIL}' needs to be reconnected: {exc}"
+            f"Gmail account '{sender_email}' needs to be reconnected: {exc}"
         ) from exc
 
     return result
 
 
 def send_bulk_emails(
+    sender_email: str,
     emails: List[Dict[str, str]],
     attachments: Optional[List[Dict[str, str]]] = None
 ) -> List[Dict[str, any]]:
@@ -97,6 +95,7 @@ def send_bulk_emails(
     Send multiple emails at once.
 
     Args:
+        sender_email: the connected Gmail account to send from
         emails: List of dicts with keys: recipient, subject, body
         attachments: Optional list of attachments shared by every email
             in the batch (dicts with keys: filename, content_base64, mime_type)
@@ -105,10 +104,7 @@ def send_bulk_emails(
         List of results with keys: recipient, gmail_message_id, status, error
     """
 
-    if not SENDER_EMAIL:
-        raise ValueError("SENDER_EMAIL is missing from .env")
-
-    service, _ = get_gmail_service(SENDER_EMAIL, allow_oauth=False)
+    service, _ = get_gmail_service(sender_email, allow_oauth=False)
     results = []
 
     for email_data in emails:
@@ -150,14 +146,11 @@ def send_bulk_emails(
     return results
 
 
-def get_message_id_header(gmail_message_id: str) -> Optional[str]:
+def get_message_id_header(sender_email: str, gmail_message_id: str) -> Optional[str]:
     """Fetches the RFC822 'Message-ID' header for a message we sent, so a
     later follow-up can thread properly via In-Reply-To/References."""
 
-    if not SENDER_EMAIL:
-        raise ValueError("SENDER_EMAIL is missing from .env")
-
-    service, _ = get_gmail_service(SENDER_EMAIL, allow_oauth=False)
+    service, _ = get_gmail_service(sender_email, allow_oauth=False)
 
     message = service.users().messages().get(
         userId="me",
@@ -173,14 +166,11 @@ def get_message_id_header(gmail_message_id: str) -> Optional[str]:
     return None
 
 
-def thread_has_reply(thread_id: str, after: datetime) -> bool:
+def thread_has_reply(sender_email: str, thread_id: str, after: datetime) -> bool:
     """True if the thread contains any message received (INBOX-labeled,
     i.e. not one we sent) with an internal timestamp after `after`."""
 
-    if not SENDER_EMAIL:
-        raise ValueError("SENDER_EMAIL is missing from .env")
-
-    service, _ = get_gmail_service(SENDER_EMAIL, allow_oauth=False)
+    service, _ = get_gmail_service(sender_email, allow_oauth=False)
 
     thread = service.users().threads().get(
         userId="me",
@@ -202,6 +192,7 @@ def thread_has_reply(thread_id: str, after: datetime) -> bool:
 
 
 def send_followup_email(
+    sender_email: str,
     thread_id: str,
     in_reply_to_header: Optional[str],
     recipient: str,
@@ -210,10 +201,7 @@ def send_followup_email(
 ):
     """Sends a follow-up as a reply within the original thread."""
 
-    if not SENDER_EMAIL:
-        raise ValueError("SENDER_EMAIL is missing from .env")
-
-    service, _ = get_gmail_service(SENDER_EMAIL, allow_oauth=False)
+    service, _ = get_gmail_service(sender_email, allow_oauth=False)
 
     reply_subject = subject if subject.strip().lower().startswith("re:") else f"Re: {subject}"
 
@@ -238,7 +226,7 @@ def send_followup_email(
 
     except RefreshError as exc:
         raise SenderNotAuthenticatedError(
-            f"Gmail account '{SENDER_EMAIL}' needs to be reconnected: {exc}"
+            f"Gmail account '{sender_email}' needs to be reconnected: {exc}"
         ) from exc
 
     return result

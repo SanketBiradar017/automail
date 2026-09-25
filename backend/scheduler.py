@@ -13,7 +13,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from backend.database import DATABASE_URL, SessionLocal
 from backend.models import ScheduledEmail, EmailCampaign, Email
 from backend.gmail_sender import send_email
-from backend.gmail_auth import SenderNotAuthenticatedError
+from backend.gmail_auth import get_active_gmail_email, SenderNotAuthenticatedError
 
 scheduler = BackgroundScheduler(
     jobstores={"default": SQLAlchemyJobStore(url=DATABASE_URL, tablename="apscheduler_jobs")},
@@ -129,7 +129,12 @@ def execute_scheduled_email(schedule_id: int):
         attachments = _load_attachments(schedule)
 
         try:
+            # Resolved live at send-time, not locked in when the schedule was
+            # created, per "must use the selected active Gmail account".
+            active_email = get_active_gmail_email()
+
             result = send_email(
+                sender_email=active_email,
                 recipient=schedule.recipient_email,
                 subject=schedule.subject,
                 body=schedule.body,
@@ -154,6 +159,7 @@ def execute_scheduled_email(schedule_id: int):
                     source_type="scheduled",
                     source_email_id=email_record.id,
                     source_scheduled_email_id=schedule.id,
+                    sender_email=active_email,
                     recipient_email=schedule.recipient_email,
                     recipient_name=schedule.recipient_name or "",
                     subject=schedule.subject,

@@ -1,10 +1,36 @@
+# # .env
+# # token.json
+# # credentials/
+# # tokens/
+# # .venv/
+# # __pycache__/
+# # *.pyc
 # .env
-# token.json
-# credentials/
 # tokens/
-# .venv/
-# __pycache__/
-# *.pyc
+# mailgenie.db
+
+
+# Environment variables / secrets
 .env
+
+# Google OAuth credentials & tokens
+credentials/
 tokens/
+token.json
+
+# Python virtual environment
+.venv/
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Local database
 mailgenie.db
+
+# IDE / OS files
+.vscode/
+.idea/
+.DS_Store

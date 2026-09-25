@@ -11,7 +11,7 @@
     <title>AutoMail AI</title>
     
 
-    <link rel="stylesheet" href="/static/style.css?v=15">
+    <link rel="stylesheet" href="/static/style.css?v=17">
 
 </head>
 
@@ -44,17 +44,24 @@
             </button>
         </nav>
 
-        <div class="status" id="senderStatus">
-            <span id="senderDot"></span>
-            <span id="senderText">Checking sender account...</span>
-            <button
-                id="connectBtn"
-                class="connect-btn"
-                onclick="connectSender()"
-                style="display: none;"
-            >
-                Connect Gmail
+        <div class="account-dropdown" id="accountDropdown">
+            <button class="account-trigger" id="accountTrigger" onclick="toggleAccountMenu()" type="button">
+                <span class="account-dot" id="accountDot"></span>
+                <span id="accountTriggerText">Loading...</span>
+                <span class="account-caret">▾</span>
             </button>
+
+            <div class="account-menu" id="accountMenu" style="display: none;">
+                <div class="account-menu-header">Gmail Accounts</div>
+
+                <div id="accountList" class="account-list">
+                    <div class="account-empty">Loading...</div>
+                </div>
+
+                <button class="account-add-btn" id="addGmailBtn" onclick="addGmailAccount()" type="button">
+                    + Add Gmail
+                </button>
+            </div>
         </div>
 
     </header>
@@ -735,7 +742,7 @@
     <div class="toast-container" id="toastContainer"></div>
 
 
-    <script src="/static/app.js?v=15"></script>
+    <script src="/static/app.js?v=16"></script>
 
 </body>
 

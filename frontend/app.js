@@ -556,82 +556,196 @@ function copyEmail() {
 }
 
 
-/* ---------- Sender account ---------- */
+/* ---------- Gmail accounts (multi-account dropdown) ---------- */
 
-async function refreshSenderStatus() {
+let gmailAccountsCache = [];
 
-    const dot = document.getElementById("senderDot");
-    const text = document.getElementById("senderText");
-    const connectBtn = document.getElementById("connectBtn");
+async function refreshGmailAccounts() {
+    const dot = document.getElementById("accountDot");
+    const triggerText = document.getElementById("accountTriggerText");
 
     try {
-
-        const response = await fetch("/api/email/sender");
+        const response = await fetch("/api/gmail-accounts");
         const data = await response.json();
 
-        if (!data.configured_sender) {
+        if (!response.ok) {
+            throw new Error(extractErrorMessage(data, "Failed to load Gmail accounts."));
+        }
+
+        gmailAccountsCache = data.accounts;
+        renderAccountList();
+
+        const active = gmailAccountsCache.find(a => a.is_active);
+
+        if (!active) {
             dot.classList.add("disconnected");
-            text.innerText = "SENDER_EMAIL is missing from .env";
-            connectBtn.style.display = "none";
+            triggerText.innerText = gmailAccountsCache.length
+                ? "Select account"
+                : "No Gmail connected";
             return;
         }
 
-        if (data.authenticated) {
-            dot.classList.remove("disconnected");
-            text.innerText = data.configured_sender;
-            connectBtn.style.display = "none";
-
-        } else {
+        if (active.status === "needs_reconnect") {
             dot.classList.add("disconnected");
-            text.innerText = `${data.configured_sender} · Not Connected`;
-            connectBtn.style.display = "inline-block";
+            triggerText.innerText = `${active.email} · Reconnect`;
+        } else {
+            dot.classList.remove("disconnected");
+            triggerText.innerText = active.email;
         }
 
     } catch (error) {
-
-        console.error("Sender status error:", error);
-
+        console.error("Gmail accounts error:", error);
         dot.classList.add("disconnected");
-        text.innerText = "Unable to check sender status";
+        triggerText.innerText = "Unable to load accounts";
     }
 }
 
 
-async function connectSender() {
+function renderAccountList() {
+    const list = document.getElementById("accountList");
 
-    const connectBtn = document.getElementById("connectBtn");
+    if (!gmailAccountsCache.length) {
+        list.innerHTML = `<div class="account-empty">No Gmail accounts connected yet.</div>`;
+        return;
+    }
 
-    connectBtn.innerText = "Connecting...";
-    connectBtn.disabled = true;
+    list.innerHTML = gmailAccountsCache.map(a => {
+        const needsReconnect = a.status === "needs_reconnect";
+        const label = a.display_name ? `${escapeHtml(a.display_name)} <span class="account-email">${escapeHtml(a.email)}</span>` : escapeHtml(a.email);
 
-    toast("Opening Google sign-in for the sender account...", "info");
+        return `
+            <div class="account-row ${a.is_active ? "active" : ""}">
+                <button
+                    type="button"
+                    class="account-row-main"
+                    onclick="${needsReconnect ? `reconnectGmailAccount(${a.id})` : `activateGmailAccount(${a.id})`}"
+                    ${a.is_active && !needsReconnect ? "disabled" : ""}
+                >
+                    <span class="account-row-dot ${needsReconnect ? "disconnected" : ""}"></span>
+                    <span class="account-row-label">${label}</span>
+                    ${a.is_active ? '<span class="account-active-badge">Active</span>' : ""}
+                    ${needsReconnect ? '<span class="account-reconnect-badge">Reconnect</span>' : ""}
+                </button>
+                <button
+                    type="button"
+                    class="account-row-remove"
+                    onclick="disconnectGmailAccount(${a.id}, '${escapeHtml(a.email).replace(/'/g, "\\'")}')"
+                    title="Disconnect"
+                >✕</button>
+            </div>
+        `;
+    }).join("");
+}
+
+
+function toggleAccountMenu(forceClose = false) {
+    const menu = document.getElementById("accountMenu");
+    const isOpen = menu.style.display !== "none";
+
+    if (forceClose || isOpen) {
+        menu.style.display = "none";
+    } else {
+        menu.style.display = "block";
+    }
+}
+
+
+document.addEventListener("click", (e) => {
+    const dropdown = document.getElementById("accountDropdown");
+    if (dropdown && !dropdown.contains(e.target)) {
+        toggleAccountMenu(true);
+    }
+});
+
+
+async function activateGmailAccount(accountId) {
+    try {
+        const response = await fetch(`/api/gmail-accounts/${accountId}/activate`, { method: "POST" });
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(extractErrorMessage(data, "Failed to switch account."));
+        }
+
+        toast(`Switched to ${data.account.email}.`, "success");
+        toggleAccountMenu(true);
+        await refreshGmailAccounts();
+
+    } catch (error) {
+        console.error("Activate account error:", error);
+        toast(error.message, "error");
+    }
+}
+
+
+async function addGmailAccount() {
+    const btn = document.getElementById("addGmailBtn");
+    btn.disabled = true;
+    btn.innerText = "Waiting for sign-in...";
+
+    toast("Complete sign-in in the browser window that just opened...", "info");
 
     try {
-
-        const response = await fetch(
-            "/api/email/connect-sender",
-            { method: "POST" }
-        );
-
+        const response = await fetch("/api/gmail-accounts/connect", { method: "POST" });
         const data = await response.json();
 
         if (!response.ok) {
             throw new Error(extractErrorMessage(data, "Failed to connect Gmail account."));
         }
 
-        toast(`Gmail account connected: ${data.sender_email}`, "success");
-
-        await refreshSenderStatus();
+        toast(`Connected ${data.account.email}.`, "success");
+        await refreshGmailAccounts();
 
     } catch (error) {
-
-        console.error("Connect sender error:", error);
+        console.error("Add Gmail account error:", error);
         toast(error.message, "error");
-
     } finally {
+        btn.disabled = false;
+        btn.innerText = "+ Add Gmail";
+    }
+}
 
-        connectBtn.innerText = "Connect Gmail";
-        connectBtn.disabled = false;
+
+async function reconnectGmailAccount(accountId) {
+    toast("Complete sign-in in the browser window that just opened...", "info");
+
+    try {
+        const response = await fetch(`/api/gmail-accounts/${accountId}/reconnect`, { method: "POST" });
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(extractErrorMessage(data, "Failed to reconnect Gmail account."));
+        }
+
+        toast(data.message || "Reconnected.", "success");
+        await refreshGmailAccounts();
+
+    } catch (error) {
+        console.error("Reconnect account error:", error);
+        toast(error.message, "error");
+    }
+}
+
+
+async function disconnectGmailAccount(accountId, email) {
+    if (!confirm(`Disconnect ${email}? You'll need to add it again to use it.`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/gmail-accounts/${accountId}`, { method: "DELETE" });
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(extractErrorMessage(data, "Failed to disconnect account."));
+        }
+
+        toast("Gmail account disconnected.", "success");
+        await refreshGmailAccounts();
+
+    } catch (error) {
+        console.error("Disconnect account error:", error);
+        toast(error.message, "error");
     }
 }
 
@@ -2031,7 +2145,7 @@ async function saveFollowupEdit() {
 
 document.addEventListener("DOMContentLoaded", () => {
 
-    refreshSenderStatus();
+    refreshGmailAccounts();
     updateContextCounter();
     updatePreviewEmptyState();
 
