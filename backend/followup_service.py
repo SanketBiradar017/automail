@@ -11,7 +11,6 @@ from backend.gmail_sender import (
     thread_has_reply,
     send_followup_email
 )
-from backend.gmail_auth import get_active_gmail_email, SenderNotAuthenticatedError
 from backend.gemini_service import generate_followup_email
 
 
@@ -44,7 +43,6 @@ def create_followup_sequence(
     source_type: str,
     source_email_id=None,
     source_scheduled_email_id=None,
-    sender_email: str,
     recipient_email: str,
     recipient_name: str,
     subject: str,
@@ -58,11 +56,10 @@ def create_followup_sequence(
 ) -> FollowUpSequence:
     """Creates and activates a follow-up sequence for an email that was just
     sent (immediately or via the scheduler). Called right after a successful
-    send, using that send's real Gmail message/thread id and the account it
-    was sent from."""
+    send, using that send's real Gmail message/thread id."""
 
     try:
-        message_id_header = get_message_id_header(sender_email, gmail_message_id)
+        message_id_header = get_message_id_header(gmail_message_id)
     except Exception:
         message_id_header = None
 
@@ -111,19 +108,8 @@ def process_followup_check(sequence_id: int):
         seq.last_checked_at = datetime.utcnow()
         db.commit()
 
-        # Resolved live (not fixed at sequence-creation time) so a later
-        # account switch/disconnect is respected, per the "must use the
-        # selected active Gmail account" requirement.
         try:
-            active_email = get_active_gmail_email()
-        except SenderNotAuthenticatedError as exc:
-            seq.status = "failed"
-            seq.last_error = str(exc)
-            db.commit()
-            return
-
-        try:
-            replied = thread_has_reply(active_email, seq.thread_id, after=seq.original_sent_at)
+            replied = thread_has_reply(seq.thread_id, after=seq.original_sent_at)
         except Exception as exc:
             seq.status = "failed"
             seq.last_error = str(exc)
@@ -155,7 +141,6 @@ def process_followup_check(sequence_id: int):
             )
 
             send_followup_email(
-                sender_email=active_email,
                 thread_id=seq.thread_id,
                 in_reply_to_header=seq.original_message_id_header,
                 recipient=seq.recipient_email,

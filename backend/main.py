@@ -5,10 +5,8 @@ from fastapi.responses import FileResponse
 from backend.routes.email_routes import router
 from backend.routes.schedule_routes import router as schedule_router
 from backend.routes.followup_routes import router as followup_router
-from backend.routes.gmail_accounts_routes import router as gmail_accounts_router
 from backend.database import init_db
 from backend.scheduler import start_scheduler, shutdown_scheduler
-from backend.gmail_auth import migrate_legacy_sender_token
 
 
 app = FastAPI(
@@ -18,12 +16,10 @@ app = FastAPI(
 )
 
 init_db()
-migrate_legacy_sender_token()
 
 app.include_router(router)
 app.include_router(schedule_router)
 app.include_router(followup_router)
-app.include_router(gmail_accounts_router)
 
 
 @app.on_event("startup")

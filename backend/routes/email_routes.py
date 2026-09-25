@@ -8,10 +8,12 @@ from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 from googleapiclient.errors import HttpError
 
+from backend.config import SENDER_EMAIL
 from backend.gemini_service import generate_email
 from backend.gmail_sender import send_email, send_bulk_emails
 from backend.gmail_auth import (
-    get_active_gmail_email,
+    get_gmail_service,
+    get_sender_status,
     SenderMismatchError,
     SenderNotAuthenticatedError,
     GmailVerificationError
@@ -136,6 +138,59 @@ def generate(request: EmailGenerateRequest):
     }
 
 
+@router.get("/sender")
+def sender_status():
+
+    if not SENDER_EMAIL:
+        return {
+            "configured_sender": None,
+            "authenticated_sender": None,
+            "authenticated": False
+        }
+
+    matches, authenticated_email = get_sender_status(SENDER_EMAIL)
+
+    return {
+        "configured_sender": SENDER_EMAIL,
+        "authenticated_sender": authenticated_email if matches else None,
+        "authenticated": matches
+    }
+
+
+@router.post("/connect-sender")
+def connect_sender():
+
+    if not SENDER_EMAIL:
+        raise HTTPException(
+            status_code=400,
+            detail="SENDER_EMAIL is missing from .env"
+        )
+
+    try:
+        _, authenticated_email = get_gmail_service(SENDER_EMAIL, allow_oauth=True)
+
+    except SenderMismatchError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    except GmailVerificationError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Gmail OAuth authorization failed: {exc}"
+        )
+
+    return {
+        "success": True,
+        "sender_email": authenticated_email,
+        "message": "Gmail account connected successfully"
+    }
+
+
 @router.post("/send")
 def send(request: EmailSendRequest, db: Session = Depends(get_db)):
 
@@ -145,10 +200,11 @@ def send(request: EmailSendRequest, db: Session = Depends(get_db)):
             detail="Email body cannot be empty."
         )
 
-    try:
-        sender_email = get_active_gmail_email()
-    except SenderNotAuthenticatedError as exc:
-        raise HTTPException(status_code=401, detail=str(exc))
+    if not SENDER_EMAIL:
+        raise HTTPException(
+            status_code=500,
+            detail="SENDER_EMAIL is missing from .env"
+        )
 
     campaign = EmailCampaign(
         name=f"Single: {request.subject}"[:255],
@@ -182,7 +238,6 @@ def send(request: EmailSendRequest, db: Session = Depends(get_db)):
 
     try:
         result = send_email(
-            sender_email=sender_email,
             recipient=request.recipient,
             subject=request.subject,
             body=request.body,
@@ -240,7 +295,6 @@ def send(request: EmailSendRequest, db: Session = Depends(get_db)):
             source_type="send",
             source_email_id=email_record.id,
             source_scheduled_email_id=None,
-            sender_email=sender_email,
             recipient_email=request.recipient,
             recipient_name=request.recipient_name or "",
             subject=request.subject,
@@ -265,10 +319,11 @@ def send_bulk(
     request: BulkEmailSendRequest,
     db: Session = Depends(get_db)
 ):
-    try:
-        sender_email = get_active_gmail_email()
-    except SenderNotAuthenticatedError as exc:
-        raise HTTPException(status_code=401, detail=str(exc))
+    if not SENDER_EMAIL:
+        raise HTTPException(
+            status_code=500,
+            detail="SENDER_EMAIL is missing from .env"
+        )
 
     try:
         campaign = EmailCampaign(
@@ -312,7 +367,7 @@ def send_bulk(
 
         db.flush()
 
-        results = send_bulk_emails(sender_email, emails_to_send, attachments=attachments_payload)
+        results = send_bulk_emails(emails_to_send, attachments=attachments_payload)
 
         for i, result in enumerate(results):
             email_records[i].status = result["status"]

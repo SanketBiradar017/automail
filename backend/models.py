@@ -4,31 +4,6 @@ from datetime import datetime
 from backend.database import Base
 
 
-class GmailAccount(Base):
-    __tablename__ = "gmail_accounts"
-
-    id = Column(Integer, primary_key=True, index=True)
-    email = Column(String(255), unique=True, nullable=False, index=True)
-    display_name = Column(String(255), nullable=True)
-
-    # Serialized google.oauth2.credentials.Credentials (to_json()). Never
-    # returned by any API response - routes only ever expose id/email/
-    # display_name/status/timestamps.
-    token_json = Column(Text, nullable=False)
-
-    is_active = Column(Boolean, default=False)
-
-    # connected, needs_reconnect
-    status = Column(String(20), nullable=False, default="connected")
-    last_error = Column(Text, nullable=True)
-
-    connected_at = Column(DateTime, default=datetime.utcnow)
-    last_verified_at = Column(DateTime, nullable=True)
-
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-
 class EmailCampaign(Base):
     __tablename__ = "email_campaigns"
 
