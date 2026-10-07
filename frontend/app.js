@@ -1044,30 +1044,9 @@ function switchTab(tab) {
 
 /* ---------- History ---------- */
 
-async function loadCampaigns() {
+function renderCampaignList(campaigns) {
     const list = document.getElementById("campaignsList");
-    list.innerHTML = '<div class="loading-state"><p>Loading campaigns...</p></div>';
-
-    try {
-        const response = await fetch("/api/email/campaigns");
-        const data = await response.json();
-
-        if (!response.ok) {
-            throw new Error(extractErrorMessage(data, "Failed to load campaigns."));
-        }
-
-        if (!data.campaigns || data.campaigns.length === 0) {
-            list.innerHTML = `
-                <div class="empty-state">
-                    <div class="empty-icon">📧</div>
-                    <h3>No campaigns yet</h3>
-                    <p>Emails you send will appear here.</p>
-                </div>
-            `;
-            return;
-        }
-
-        list.innerHTML = data.campaigns.map(campaign => `
+    list.innerHTML = campaigns.map(campaign => `
             <div class="campaign-card">
                 <div class="campaign-info">
                     <h3>${escapeHtml(campaign.name)}</h3>
@@ -1095,6 +1074,33 @@ async function loadCampaigns() {
                 </div>
             </div>
         `).join("");
+}
+
+
+async function loadCampaigns() {
+    const list = document.getElementById("campaignsList");
+    list.innerHTML = '<div class="loading-state"><p>Loading campaigns...</p></div>';
+
+    try {
+        const response = await fetch("/api/email/campaigns");
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(extractErrorMessage(data, "Failed to load campaigns."));
+        }
+
+        if (!data.campaigns || data.campaigns.length === 0) {
+            list.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">📧</div>
+                    <h3>No campaigns yet</h3>
+                    <p>Emails you send will appear here.</p>
+                </div>
+            `;
+            return;
+        }
+
+        renderCampaignList(data.campaigns);
 
     } catch (error) {
         console.error("Load campaigns error:", error);
@@ -1105,6 +1111,35 @@ async function loadCampaigns() {
         `;
         toast(error.message, "error");
     }
+}
+
+
+function renderCampaignEmails(campaignId, emails) {
+    const emailsList = document.getElementById(`emails-${campaignId}`);
+    if (!emailsList) return;
+    emailsList.innerHTML = emails.map(email => `
+            <div class="email-item ${email.status}">
+                <div class="email-row" onclick="toggleEmailContent(${email.id})">
+                    <div class="email-info">
+                        <p class="email-recipient">${escapeHtml(email.recipient_email)}</p>
+                        <p class="email-name">${escapeHtml(email.recipient_name)}</p>
+                        <p class="email-status">
+                            <span class="status-badge ${email.status}">${email.status.toUpperCase()}</span>
+                            ${email.sent_at ? `<span class="email-time">${formatDate(email.sent_at)}</span>` : ''}
+                        </p>
+                        ${email.error ? `<p class="email-error">Error: ${escapeHtml(email.error)}</p>` : ''}
+                    </div>
+                    <button class="btn-delete-email" onclick="event.stopPropagation(); deleteEmail(${email.id})">🗑️</button>
+                </div>
+                <div class="email-content" id="content-${email.id}" style="display: none;">
+                    <p class="email-content-subject"><strong>Subject:</strong> ${escapeHtml(email.subject || "(no subject)")}</p>
+                    ${email.cc ? `<p class="email-content-subject"><strong>CC:</strong> ${escapeHtml(email.cc)}</p>` : ''}
+                    ${email.bcc ? `<p class="email-content-subject"><strong>BCC:</strong> ${escapeHtml(email.bcc)}</p>` : ''}
+                    ${email.attachment_names && email.attachment_names.length ? `<p class="email-content-subject"><strong>Attachments:</strong> ${escapeHtml(email.attachment_names.join(", "))}</p>` : ''}
+                    <pre class="email-content-body">${escapeHtml(email.body || "(empty body)")}</pre>
+                </div>
+            </div>
+        `).join("");
 }
 
 
@@ -1135,29 +1170,7 @@ async function toggleCampaignDetails(campaignId) {
             return;
         }
 
-        emailsList.innerHTML = emails.map(email => `
-            <div class="email-item ${email.status}">
-                <div class="email-row" onclick="toggleEmailContent(${email.id})">
-                    <div class="email-info">
-                        <p class="email-recipient">${escapeHtml(email.recipient_email)}</p>
-                        <p class="email-name">${escapeHtml(email.recipient_name)}</p>
-                        <p class="email-status">
-                            <span class="status-badge ${email.status}">${email.status.toUpperCase()}</span>
-                            ${email.sent_at ? `<span class="email-time">${formatDate(email.sent_at)}</span>` : ''}
-                        </p>
-                        ${email.error ? `<p class="email-error">Error: ${escapeHtml(email.error)}</p>` : ''}
-                    </div>
-                    <button class="btn-delete-email" onclick="event.stopPropagation(); deleteEmail(${email.id})">🗑️</button>
-                </div>
-                <div class="email-content" id="content-${email.id}" style="display: none;">
-                    <p class="email-content-subject"><strong>Subject:</strong> ${escapeHtml(email.subject || "(no subject)")}</p>
-                    ${email.cc ? `<p class="email-content-subject"><strong>CC:</strong> ${escapeHtml(email.cc)}</p>` : ''}
-                    ${email.bcc ? `<p class="email-content-subject"><strong>BCC:</strong> ${escapeHtml(email.bcc)}</p>` : ''}
-                    ${email.attachment_names && email.attachment_names.length ? `<p class="email-content-subject"><strong>Attachments:</strong> ${escapeHtml(email.attachment_names.join(", "))}</p>` : ''}
-                    <pre class="email-content-body">${escapeHtml(email.body || "(empty body)")}</pre>
-                </div>
-            </div>
-        `).join("");
+        renderCampaignEmails(campaignId, emails);
 
     } catch (error) {
         console.error("Load campaign details error:", error);
@@ -2058,11 +2071,141 @@ async function saveFollowupEdit() {
 }
 
 
+
+/* ---------- Auto refresh (silent polling) ---------- */
+
+const AUTO_REFRESH_MS = 7000;
+let autoRefreshTimer = null;
+let autoRefreshBusy = false;
+const autoRefreshSigs = {};
+
+function isOverlayOpen() {
+    return ["scheduleFormOverlay", "followupEditOverlay"].some(id => {
+        const el = document.getElementById(id);
+        return el && el.style.display !== "none";
+    });
+}
+
+function openDetailIds(container) {
+    if (!container) return [];
+    return Array.from(container.querySelectorAll('[id^="details-"], [id^="content-"], [id^="schedule-details-"], [id^="followup-details-"]'))
+        .filter(el => el.style.display === "block")
+        .map(el => el.id);
+}
+
+function restoreDetailIds(ids) {
+    ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = "block";
+    });
+}
+
+async function silentJson(url) {
+    const response = await fetch(url, { cache: "no-store" });
+    if (!response.ok) throw new Error(String(response.status));
+    return response.json();
+}
+
+// Re-render only when data changed; keep expanded rows open.
+function applyIfChanged(key, data, container, render) {
+    const sig = JSON.stringify(data);
+    if (autoRefreshSigs[key] === sig) return false;
+    autoRefreshSigs[key] = sig;
+    const open = openDetailIds(container);
+    render();
+    restoreDetailIds(open);
+    return true;
+}
+
+async function refreshHistorySilently() {
+    const list = document.getElementById("campaignsList");
+    const data = await silentJson("/api/email/campaigns");
+    const campaigns = data.campaigns || [];
+    const openCampaignIds = campaigns
+        .filter(c => {
+            const el = document.getElementById(`details-${c.id}`);
+            return el && el.style.display === "block";
+        }).map(c => c.id);
+
+    const openContent = openDetailIds(list).filter(id => id.startsWith("content-"));
+    const listChanged = applyIfChanged("campaigns", campaigns, list, () => {
+        if (campaigns.length === 0) {
+            list.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">📧</div>
+                    <h3>No campaigns yet</h3>
+                    <p>Emails you send will appear here.</p>
+                </div>
+            `;
+        } else {
+            renderCampaignList(campaigns);
+        }
+    });
+    if (listChanged) {
+        // list re-render reset the per-campaign email boxes
+        Object.keys(autoRefreshSigs).forEach(k => { if (k.startsWith("campaign-")) delete autoRefreshSigs[k]; });
+    }
+
+    for (const id of openCampaignIds) {
+        const details = await silentJson(`/api/email/campaigns/${id}`);
+        const emails = (details.campaign && details.campaign.emails) || [];
+        const box = document.getElementById(`emails-${id}`);
+        if (!box) continue;
+        applyIfChanged(`campaign-${id}`, emails, box, () => {
+            if (emails.length === 0) box.innerHTML = "<p>No emails in this campaign.</p>";
+            else renderCampaignEmails(id, emails);
+        });
+    }
+    restoreDetailIds(openContent);
+}
+
+async function refreshSchedulesSilently() {
+    const query = currentScheduleStatusFilter ? `?status=${encodeURIComponent(currentScheduleStatusFilter)}` : "";
+    const data = await silentJson(`/api/schedule${query}`);
+    const listEl = document.getElementById("scheduleList");
+    applyIfChanged("schedules:" + currentScheduleStatusFilter, data.schedules, listEl, () => {
+        allSchedulesCache = data.schedules;
+        if (currentScheduleView === "list") renderScheduleList(data.schedules);
+        else renderCalendar();
+    });
+}
+
+async function refreshFollowupsSilently() {
+    const query = currentFollowupStatusFilter ? `?status=${encodeURIComponent(currentFollowupStatusFilter)}` : "";
+    const data = await silentJson(`/api/followups${query}`);
+    const listEl = document.getElementById("followupList");
+    applyIfChanged("followups:" + currentFollowupStatusFilter, data.followups, listEl, () => {
+        renderFollowupList(data.followups);
+    });
+}
+
+async function autoRefreshTick() {
+    if (autoRefreshBusy || document.hidden || isOverlayOpen()) return;
+    autoRefreshBusy = true;
+    try {
+        const active = (id) => document.getElementById(id)?.classList.contains("active");
+        if (active(SCREEN_IDS.history)) await refreshHistorySilently();
+        else if (active(SCREEN_IDS.schedule)) await refreshSchedulesSilently();
+        else if (active(SCREEN_IDS.followups)) await refreshFollowupsSilently();
+    } catch (e) {
+        // silent; next tick retries
+    } finally {
+        autoRefreshBusy = false;
+    }
+}
+
+function startAutoRefresh() {
+    if (autoRefreshTimer) return;
+    autoRefreshTimer = setInterval(autoRefreshTick, AUTO_REFRESH_MS);
+}
+
+
 /* ---------- Wiring ---------- */
 
 document.addEventListener("DOMContentLoaded", () => {
 
     refreshSenderStatus().then(handleAuthRedirect);
+    startAutoRefresh();
     updateContextCounter();
     updatePreviewEmptyState();
 
