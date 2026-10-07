@@ -25,16 +25,21 @@ GMAIL_SCOPES = os.getenv(
 ).split()
 
 
+# Google OAuth *app* credentials only - never a user's Gmail address.
+# Falls back to the CLIENT_SECRET_FILE download from Google Cloud Console.
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+
 CLIENT_SECRET_FILE = os.getenv(
     "CLIENT_SECRET_FILE",
     "credentials/client_secret.json"
 )
 
+# Optional. Defaults to <request origin>/api/auth/callback, which must be an
+# authorized redirect URI in the Google Cloud OAuth client.
+OAUTH_REDIRECT_URI = os.getenv("OAUTH_REDIRECT_URI")
 
-TOKEN_DIRECTORY = os.getenv(
-    "TOKEN_DIRECTORY",
-    "tokens"
-)
-
-
-SENDER_EMAIL = os.getenv("SENDER_EMAIL")
+# Fernet key used to encrypt stored Gmail tokens. If unset, one is generated
+# and kept in tokens/.encryption_key (git-ignored).
+TOKEN_ENCRYPTION_KEY = os.getenv("TOKEN_ENCRYPTION_KEY")
+TOKEN_DIRECTORY = os.getenv("TOKEN_DIRECTORY", "tokens")

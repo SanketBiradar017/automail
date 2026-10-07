@@ -1,37 +1,65 @@
+import json
+import logging
 import os
-import re
+import threading
+import time
+from datetime import datetime
+from typing import Optional
 
+import requests as http_requests
 from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import AuthorizedSession, Request
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
+from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 
 from backend.config import (
     GMAIL_SCOPES,
     CLIENT_SECRET_FILE,
-    TOKEN_DIRECTORY
+    GOOGLE_CLIENT_ID,
+    GOOGLE_CLIENT_SECRET
 )
+from backend.database import SessionLocal
+from backend.models import GmailAccount
+from backend.token_crypto import encrypt, decrypt
 
 
 USERINFO_ENDPOINT = "https://www.googleapis.com/oauth2/v3/userinfo"
+AUTH_URI = "https://accounts.google.com/o/oauth2/auth"
+TOKEN_URI = "https://oauth2.googleapis.com/token"
+REVOKE_URI = "https://oauth2.googleapis.com/revoke"
+
+STATE_TTL_SECONDS = 600
+
+logger = logging.getLogger("automail.oauth")
+if not logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(levelname)s:     [oauth] %(message)s"))
+    logger.addHandler(_handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+
+_SCOPE_ALIASES = {
+    "email": "https://www.googleapis.com/auth/userinfo.email",
+    "profile": "https://www.googleapis.com/auth/userinfo.profile"
+}
 
 
-class SenderMismatchError(Exception):
-    """Raised when the authenticated Gmail account doesn't match SENDER_EMAIL."""
+def _normalize_scopes(raw) -> set:
+    """Google returns the token's `scope` as a space-separated string (or
+    oauthlib turns it into a list), and may use short aliases like 'email'.
+    Returns a set of canonical scope strings."""
 
-    def __init__(self, configured_email: str, authenticated_email: str):
-        self.configured_email = configured_email
-        self.authenticated_email = authenticated_email
+    if not raw:
+        return set()
 
-        super().__init__(
-            f"Configured sender '{configured_email}' does not match "
-            f"authenticated Gmail account '{authenticated_email}'."
-        )
+    items = raw.split() if isinstance(raw, str) else list(raw)
+
+    return {_SCOPE_ALIASES.get(item.strip(), item.strip()) for item in items if item.strip()}
 
 
 class SenderNotAuthenticatedError(Exception):
-    """Raised when SENDER_EMAIL has no valid token and OAuth wasn't allowed."""
+    """Raised when no Gmail account is connected or its access was revoked."""
     pass
 
 
@@ -40,59 +68,124 @@ class GmailVerificationError(Exception):
     pass
 
 
-def _token_filename(email: str) -> str:
-    safe = re.sub(r"[^a-zA-Z0-9]+", "_", email.strip().lower()).strip("_")
-    return f"{safe}.json"
+# ---------- OAuth client config ----------
 
+def _client_config() -> dict:
+    client_id = GOOGLE_CLIENT_ID
+    client_secret = GOOGLE_CLIENT_SECRET
 
-def _token_path(email: str) -> str:
-    return os.path.join(TOKEN_DIRECTORY, _token_filename(email))
+    if not (client_id and client_secret) and os.path.exists(CLIENT_SECRET_FILE):
+        with open(CLIENT_SECRET_FILE) as f:
+            data = json.load(f)
+        info = data.get("web") or data.get("installed") or {}
+        client_id = client_id or info.get("client_id")
+        client_secret = client_secret or info.get("client_secret")
 
-
-def _load_creds(token_path: str):
-    if not os.path.exists(token_path):
-        return None
-
-    return Credentials.from_authorized_user_file(
-        token_path,
-        GMAIL_SCOPES
-    )
-
-
-def _save_creds(creds, token_path: str):
-    os.makedirs(os.path.dirname(token_path), exist_ok=True)
-
-    with open(token_path, "w") as token_file:
-        token_file.write(creds.to_json())
-
-
-def _run_login_flow():
-
-    if not os.path.exists(CLIENT_SECRET_FILE):
+    if not (client_id and client_secret):
         raise FileNotFoundError(
-            f"Gmail OAuth client secret not found at '{CLIENT_SECRET_FILE}'. "
-            "Set CLIENT_SECRET_FILE in .env or add the file."
+            "Google OAuth client not configured. Set GOOGLE_CLIENT_ID and "
+            "GOOGLE_CLIENT_SECRET in .env."
         )
 
-    print("Opening browser for Gmail login...")
+    return {
+        "web": {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "auth_uri": AUTH_URI,
+            "token_uri": TOKEN_URI
+        }
+    }
 
-    flow = InstalledAppFlow.from_client_secrets_file(
-        CLIENT_SECRET_FILE,
-        GMAIL_SCOPES
+
+# ---------- Login flow ----------
+
+# state -> (redirect_uri, code_verifier, created_at). In-memory is fine: the
+# window between /login and /callback is seconds, and a restart in between
+# just means the user clicks "Continue with Google" again.
+_pending = {}
+_pending_lock = threading.Lock()
+
+
+def build_authorization_url(redirect_uri: str) -> str:
+    flow = Flow.from_client_config(
+        _client_config(),
+        scopes=GMAIL_SCOPES,
+        redirect_uri=redirect_uri,
+        autogenerate_code_verifier=True
     )
 
-    return flow.run_local_server(port=0)
+    # offline + consent: guarantees Google returns a refresh token.
+    url, state = flow.authorization_url(
+        access_type="offline",
+        prompt="consent select_account"
+    )
+
+    now = time.time()
+    with _pending_lock:
+        for key in [k for k, v in _pending.items() if now - v[2] > STATE_TTL_SECONDS]:
+            del _pending[key]
+        _pending[state] = (redirect_uri, flow.code_verifier, now)
+
+    return url
+
+
+def complete_authorization(code: str, state: str) -> str:
+    """Exchanges the callback code, stores the account, returns its email."""
+
+    with _pending_lock:
+        pending = _pending.pop(state, None)
+
+    if not pending or time.time() - pending[2] > STATE_TTL_SECONDS:
+        raise GmailVerificationError(
+            "Sign-in session expired or invalid. Please try again."
+        )
+
+    redirect_uri, code_verifier, _ = pending
+
+    flow = Flow.from_client_config(
+        _client_config(),
+        scopes=None,  # accept whatever Google reports; checked below
+        redirect_uri=redirect_uri,
+        code_verifier=code_verifier
+    )
+    flow.fetch_token(code=code)
+
+    # Read the scopes Google actually granted from the raw token response.
+    # flow.credentials.scopes is NOT reliable: it is None when the Flow was
+    # built without scopes, and echoes the *requested* scopes otherwise.
+    token = flow.oauth2session.token
+    granted = _normalize_scopes(token.get("scope"))
+    required = _normalize_scopes(GMAIL_SCOPES)
+    missing = required - granted
+
+    logger.info(
+        "OAuth callback: requested=%s granted=%s missing=%s "
+        "token_response_keys=%s has_refresh_token=%s",
+        sorted(required), sorted(granted), sorted(missing),
+        sorted(token.keys()), bool(token.get("refresh_token"))
+    )
+
+    if missing:
+        raise GmailVerificationError(
+            "Required Gmail permissions were not granted "
+            f"(missing: {', '.join(sorted(missing))}). Please try again "
+            "and allow all requested permissions."
+        )
+
+    creds = flow.credentials
+    creds._scopes = sorted(granted)  # persist what was actually granted
+
+    email = _get_authenticated_email(creds)
+    _save_account(email, creds)
+
+    return email
 
 
 def _get_authenticated_email(creds) -> str:
-    # Deliberately NOT build("oauth2", "v2", ...).userinfo() - that legacy
-    # discovery-based API is backed by the "Legacy People API", which most
-    # Cloud projects don't have enabled and fails with an uncaught 403.
-    # The OpenID userinfo REST endpoint needs no per-project enablement and
-    # only needs the userinfo.email/openid scopes already granted below.
+    # The OpenID userinfo REST endpoint needs no per-project API enablement,
+    # unlike the legacy discovery-based oauth2 v2 API.
     try:
-        session = AuthorizedSession(creds)
-        response = session.get(USERINFO_ENDPOINT, timeout=10)
+        response = AuthorizedSession(creds).get(USERINFO_ENDPOINT, timeout=10)
 
     except RefreshError:
         raise
@@ -117,139 +210,163 @@ def _get_authenticated_email(creds) -> str:
     return email.strip().lower()
 
 
-def get_gmail_service(sender_email: str, allow_oauth: bool = True):
-    """
-    Returns (service, authenticated_email) for sender_email, using an
-    account-specific token file. Refreshes an expired token when possible.
+# ---------- Storage ----------
 
-    If no valid token exists:
-      - allow_oauth=True  -> opens the browser OAuth consent screen.
-      - allow_oauth=False -> raises SenderNotAuthenticatedError.
-
-    Raises SenderMismatchError if the token's Gmail account doesn't match
-    sender_email.
-    """
-
-    if not sender_email:
-        raise ValueError("SENDER_EMAIL is not configured.")
-
-    token_path = _token_path(sender_email)
-    creds = _load_creds(token_path)
-
-    if not creds or not creds.valid:
-
-        if creds and creds.expired and creds.refresh_token:
-
-            print(f"Refreshing Gmail token for {sender_email}...")
-
-            try:
-                creds.refresh(Request())
-
-            except RefreshError:
-
-                print("Refresh token expired/revoked.")
-                creds = None
-
-        if not creds or not creds.valid:
-
-            if not allow_oauth:
-                raise SenderNotAuthenticatedError(
-                    f"Gmail account '{sender_email}' is not connected. "
-                    "Please connect the configured sender account."
-                )
-
-            creds = _run_login_flow()
-
-        _save_creds(creds, token_path)
-
-        print("Gmail authentication successful.")
-
-    # A token file loaded from disk carries the scopes it was ORIGINALLY
-    # consented with (from_authorized_user_file reads the 'scopes' key
-    # saved in the JSON), not the current GMAIL_SCOPES config. If GMAIL_SCOPES
-    # has grown (e.g. gmail.readonly added for follow-up reply detection)
-    # after this token was issued, the refresh token can't silently upgrade
-    # itself - Google just keeps returning tokens scoped to the old consent,
-    # and a readonly API call would otherwise fail later with an opaque 403.
-    # Catch that here instead, where we can ask for reconnect explicitly.
-    required_scopes = set(GMAIL_SCOPES)
-    granted_scopes = set(getattr(creds, "scopes", None) or [])
-
-    if not required_scopes.issubset(granted_scopes):
-        if not allow_oauth:
-            raise SenderNotAuthenticatedError(
-                f"Gmail account '{sender_email}' needs to be reconnected to "
-                "grant additional permissions."
-            )
-
-        creds = _run_login_flow()
-        _save_creds(creds, token_path)
-
+def _save_account(email: str, creds):
+    db = SessionLocal()
     try:
-        authenticated_email = _get_authenticated_email(creds)
+        existing = db.query(GmailAccount).filter(GmailAccount.email == email).first()
 
-    except RefreshError as exc:
-        # googleapiclient's transport refreshes before every call regardless
-        # of the expiry check above, so a token whose granted scope no
-        # longer covers what we're requesting (e.g. after adding a new
-        # scope) fails here, not in the explicit refresh branch above.
-        if not allow_oauth:
-            raise SenderNotAuthenticatedError(
-                f"Gmail account '{sender_email}' needs to be reconnected: {exc}"
-            ) from exc
+        refresh_token = creds.refresh_token
+        if not refresh_token and existing and existing.refresh_token_enc:
+            refresh_token = decrypt(existing.refresh_token_enc)
 
-        # connect-sender: re-run the consent screen so the user can grant
-        # the currently required scopes, instead of failing silently.
-        creds = _run_login_flow()
-        _save_creds(creds, token_path)
+        # Only one account is "connected" at a time.
+        db.query(GmailAccount).filter(GmailAccount.email != email).delete()
 
-        authenticated_email = _get_authenticated_email(creds)
+        row = existing or GmailAccount(email=email)
+        row.access_token_enc = encrypt(creds.token)
+        row.refresh_token_enc = encrypt(refresh_token) if refresh_token else None
+        row.token_expiry = creds.expiry
+        row.scopes = " ".join(creds.scopes or GMAIL_SCOPES)
+        row.connected_at = datetime.utcnow() if not existing else row.connected_at
 
-    if authenticated_email != sender_email.strip().lower():
-        raise SenderMismatchError(sender_email, authenticated_email)
+        db.add(row)
+        db.commit()
+    finally:
+        db.close()
 
-    service = build(
-        "gmail",
-        "v1",
-        credentials=creds
+
+def _load_account(db) -> Optional[GmailAccount]:
+    return db.query(GmailAccount).order_by(GmailAccount.updated_at.desc()).first()
+
+
+def _creds_from_row(row: GmailAccount) -> Credentials:
+    config = _client_config()["web"]
+
+    return Credentials(
+        token=decrypt(row.access_token_enc),
+        refresh_token=decrypt(row.refresh_token_enc) if row.refresh_token_enc else None,
+        token_uri=TOKEN_URI,
+        client_id=config["client_id"],
+        client_secret=config["client_secret"],
+        scopes=(row.scopes or "").split() or GMAIL_SCOPES,
+        expiry=row.token_expiry
     )
 
-    return service, authenticated_email
 
+# ---------- Public API ----------
 
-def get_sender_status(sender_email: str):
+def get_gmail_service():
     """
-    Read-only check: never opens a browser or refreshes interactively.
-    Returns (matches: bool, authenticated_email: str | None).
+    Returns (service, email) for the currently connected Gmail account.
+    Expired access tokens are refreshed automatically and persisted.
+
+    Raises SenderNotAuthenticatedError if no account is connected or its
+    refresh token was revoked/expired (the stale row is removed so the UI
+    falls back to "Continue with Google").
     """
 
-    if not sender_email:
-        return False, None
+    db = SessionLocal()
+    try:
+        row = _load_account(db)
 
-    token_path = _token_path(sender_email)
-    creds = _load_creds(token_path)
+        if not row:
+            raise SenderNotAuthenticatedError(
+                "No Gmail account connected. Please connect your Gmail account."
+            )
 
-    if not creds:
-        return False, None
+        creds = _creds_from_row(row)
 
-    if not creds.valid:
+        if not creds.valid:
 
-        if creds.expired and creds.refresh_token:
+            if not creds.refresh_token:
+                db.delete(row)
+                db.commit()
+                raise SenderNotAuthenticatedError(
+                    "Gmail session expired. Please reconnect your Gmail account."
+                )
+
             try:
                 creds.refresh(Request())
-                _save_creds(creds, token_path)
 
-            except RefreshError:
-                return False, None
-        else:
-            return False, None
+            except RefreshError as exc:
+                db.delete(row)
+                db.commit()
+                raise SenderNotAuthenticatedError(
+                    f"Gmail access for '{row.email}' was revoked or expired. "
+                    f"Please reconnect: {exc}"
+                ) from exc
+
+            row.access_token_enc = encrypt(creds.token)
+            row.token_expiry = creds.expiry
+            db.commit()
+
+        email = row.email
+
+    finally:
+        db.close()
+
+    service = build("gmail", "v1", credentials=creds, cache_discovery=False)
+
+    return service, email
+
+
+def get_connected_email() -> Optional[str]:
+    """Read-only: the connected account's email, or None. No network calls."""
+
+    db = SessionLocal()
+    try:
+        row = _load_account(db)
+        return row.email if row else None
+    finally:
+        db.close()
+
+
+def get_sender_status():
+    """Returns (connected: bool, email | None). Refreshes the token if it is
+    expired, so a revoked account is reported as disconnected."""
+
+    if not get_connected_email():
+        return False, None
 
     try:
-        authenticated_email = _get_authenticated_email(creds)
+        _, email = get_gmail_service()
+        return True, email
 
     except Exception:
         return False, None
 
-    matches = authenticated_email == sender_email.strip().lower()
 
-    return matches, authenticated_email
+def disconnect_account() -> bool:
+    """Revokes the token at Google (best effort) and deletes it locally."""
+
+    db = SessionLocal()
+    try:
+        row = _load_account(db)
+
+        if not row:
+            return False
+
+        token = (
+            decrypt(row.refresh_token_enc)
+            if row.refresh_token_enc
+            else decrypt(row.access_token_enc)
+        )
+
+        try:
+            http_requests.post(
+                REVOKE_URI,
+                params={"token": token},
+                headers={"content-type": "application/x-www-form-urlencoded"},
+                timeout=10
+            )
+        except Exception:
+            pass  # still remove local access
+
+        db.delete(row)
+        db.commit()
+        return True
+
+    finally:
+        db.close()

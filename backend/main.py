@@ -5,6 +5,7 @@ from fastapi.responses import FileResponse
 from backend.routes.email_routes import router
 from backend.routes.schedule_routes import router as schedule_router
 from backend.routes.followup_routes import router as followup_router
+from backend.routes.auth_routes import router as auth_router
 from backend.database import init_db
 from backend.scheduler import start_scheduler, shutdown_scheduler
 
@@ -20,6 +21,7 @@ init_db()
 app.include_router(router)
 app.include_router(schedule_router)
 app.include_router(followup_router)
+app.include_router(auth_router)
 
 
 @app.on_event("startup")

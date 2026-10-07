@@ -122,3 +122,19 @@ class FollowUpSequence(Base):
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class GmailAccount(Base):
+    """The currently connected Gmail account. At most one row; connecting a
+    different account replaces it, disconnecting deletes it. Tokens are
+    Fernet-encrypted at rest (see backend/token_crypto.py)."""
+    __tablename__ = "gmail_accounts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(255), nullable=False, unique=True)
+    access_token_enc = Column(Text, nullable=False)
+    refresh_token_enc = Column(Text, nullable=True)
+    token_expiry = Column(DateTime, nullable=True)  # naive UTC
+    scopes = Column(Text, nullable=True)  # space separated
+    connected_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

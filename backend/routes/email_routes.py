@@ -8,13 +8,10 @@ from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 from googleapiclient.errors import HttpError
 
-from backend.config import SENDER_EMAIL
 from backend.gemini_service import generate_email
 from backend.gmail_sender import send_email, send_bulk_emails
 from backend.gmail_auth import (
-    get_gmail_service,
-    get_sender_status,
-    SenderMismatchError,
+    get_connected_email,
     SenderNotAuthenticatedError,
     GmailVerificationError
 )
@@ -138,59 +135,6 @@ def generate(request: EmailGenerateRequest):
     }
 
 
-@router.get("/sender")
-def sender_status():
-
-    if not SENDER_EMAIL:
-        return {
-            "configured_sender": None,
-            "authenticated_sender": None,
-            "authenticated": False
-        }
-
-    matches, authenticated_email = get_sender_status(SENDER_EMAIL)
-
-    return {
-        "configured_sender": SENDER_EMAIL,
-        "authenticated_sender": authenticated_email if matches else None,
-        "authenticated": matches
-    }
-
-
-@router.post("/connect-sender")
-def connect_sender():
-
-    if not SENDER_EMAIL:
-        raise HTTPException(
-            status_code=400,
-            detail="SENDER_EMAIL is missing from .env"
-        )
-
-    try:
-        _, authenticated_email = get_gmail_service(SENDER_EMAIL, allow_oauth=True)
-
-    except SenderMismatchError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
-
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-    except GmailVerificationError as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
-
-    except Exception as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Gmail OAuth authorization failed: {exc}"
-        )
-
-    return {
-        "success": True,
-        "sender_email": authenticated_email,
-        "message": "Gmail account connected successfully"
-    }
-
-
 @router.post("/send")
 def send(request: EmailSendRequest, db: Session = Depends(get_db)):
 
@@ -200,10 +144,10 @@ def send(request: EmailSendRequest, db: Session = Depends(get_db)):
             detail="Email body cannot be empty."
         )
 
-    if not SENDER_EMAIL:
+    if not get_connected_email():
         raise HTTPException(
-            status_code=500,
-            detail="SENDER_EMAIL is missing from .env"
+            status_code=401,
+            detail="No Gmail account connected. Please connect your Gmail account."
         )
 
     campaign = EmailCampaign(
@@ -249,10 +193,6 @@ def send(request: EmailSendRequest, db: Session = Depends(get_db)):
     except SenderNotAuthenticatedError as exc:
         db.rollback()
         raise HTTPException(status_code=401, detail=str(exc))
-
-    except SenderMismatchError as exc:
-        db.rollback()
-        raise HTTPException(status_code=409, detail=str(exc))
 
     except GmailVerificationError as exc:
         db.rollback()
@@ -319,10 +259,10 @@ def send_bulk(
     request: BulkEmailSendRequest,
     db: Session = Depends(get_db)
 ):
-    if not SENDER_EMAIL:
+    if not get_connected_email():
         raise HTTPException(
-            status_code=500,
-            detail="SENDER_EMAIL is missing from .env"
+            status_code=401,
+            detail="No Gmail account connected. Please connect your Gmail account."
         )
 
     try:

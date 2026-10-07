@@ -8,7 +8,6 @@ from typing import List, Dict, Optional
 
 from google.auth.exceptions import RefreshError
 
-from backend.config import SENDER_EMAIL
 from backend.gmail_auth import get_gmail_service, SenderNotAuthenticatedError
 
 
@@ -60,12 +59,7 @@ def send_email(
     attachments: Optional[List[Dict[str, str]]] = None
 ):
 
-    if not SENDER_EMAIL:
-        raise ValueError("SENDER_EMAIL is missing from .env")
-
-    # allow_oauth=False: sending must never block on an interactive OAuth
-    # flow. The sender account is connected explicitly via /connect-sender.
-    service, _ = get_gmail_service(SENDER_EMAIL, allow_oauth=False)
+    service, sender = get_gmail_service()
 
     message = _build_message(recipient, subject, body, cc, bcc, attachments)
 
@@ -83,7 +77,7 @@ def send_email(
 
     except RefreshError as exc:
         raise SenderNotAuthenticatedError(
-            f"Gmail account '{SENDER_EMAIL}' needs to be reconnected: {exc}"
+            f"Gmail account '{sender}' needs to be reconnected: {exc}"
         ) from exc
 
     return result
@@ -105,10 +99,7 @@ def send_bulk_emails(
         List of results with keys: recipient, gmail_message_id, status, error
     """
 
-    if not SENDER_EMAIL:
-        raise ValueError("SENDER_EMAIL is missing from .env")
-
-    service, _ = get_gmail_service(SENDER_EMAIL, allow_oauth=False)
+    service, sender = get_gmail_service()
     results = []
 
     for email_data in emails:
@@ -154,10 +145,7 @@ def get_message_id_header(gmail_message_id: str) -> Optional[str]:
     """Fetches the RFC822 'Message-ID' header for a message we sent, so a
     later follow-up can thread properly via In-Reply-To/References."""
 
-    if not SENDER_EMAIL:
-        raise ValueError("SENDER_EMAIL is missing from .env")
-
-    service, _ = get_gmail_service(SENDER_EMAIL, allow_oauth=False)
+    service, sender = get_gmail_service()
 
     message = service.users().messages().get(
         userId="me",
@@ -177,10 +165,7 @@ def thread_has_reply(thread_id: str, after: datetime) -> bool:
     """True if the thread contains any message received (INBOX-labeled,
     i.e. not one we sent) with an internal timestamp after `after`."""
 
-    if not SENDER_EMAIL:
-        raise ValueError("SENDER_EMAIL is missing from .env")
-
-    service, _ = get_gmail_service(SENDER_EMAIL, allow_oauth=False)
+    service, sender = get_gmail_service()
 
     thread = service.users().threads().get(
         userId="me",
@@ -210,10 +195,7 @@ def send_followup_email(
 ):
     """Sends a follow-up as a reply within the original thread."""
 
-    if not SENDER_EMAIL:
-        raise ValueError("SENDER_EMAIL is missing from .env")
-
-    service, _ = get_gmail_service(SENDER_EMAIL, allow_oauth=False)
+    service, sender = get_gmail_service()
 
     reply_subject = subject if subject.strip().lower().startswith("re:") else f"Re: {subject}"
 
@@ -238,7 +220,7 @@ def send_followup_email(
 
     except RefreshError as exc:
         raise SenderNotAuthenticatedError(
-            f"Gmail account '{SENDER_EMAIL}' needs to be reconnected: {exc}"
+            f"Gmail account '{sender}' needs to be reconnected: {exc}"
         ) from exc
 
     return result

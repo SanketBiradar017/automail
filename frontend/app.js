@@ -556,82 +556,113 @@ function copyEmail() {
 }
 
 
-/* ---------- Sender account ---------- */
+/* ---------- Gmail connection ---------- */
+
+function showAuthGate(show, errorMessage) {
+
+    const gate = document.getElementById("authGate");
+    const errorEl = document.getElementById("authError");
+
+    gate.style.display = show ? "flex" : "none";
+
+    if (errorMessage) {
+        errorEl.innerText = errorMessage;
+        errorEl.style.display = "block";
+    } else {
+        errorEl.style.display = "none";
+    }
+}
+
 
 async function refreshSenderStatus() {
 
     const dot = document.getElementById("senderDot");
     const text = document.getElementById("senderText");
-    const connectBtn = document.getElementById("connectBtn");
+    const disconnectBtn = document.getElementById("disconnectBtn");
 
     try {
 
-        const response = await fetch("/api/email/sender");
+        const response = await fetch("/api/auth/status");
         const data = await response.json();
 
-        if (!data.configured_sender) {
-            dot.classList.add("disconnected");
-            text.innerText = "SENDER_EMAIL is missing from .env";
-            connectBtn.style.display = "none";
-            return;
-        }
-
-        if (data.authenticated) {
+        if (data.connected) {
             dot.classList.remove("disconnected");
-            text.innerText = data.configured_sender;
-            connectBtn.style.display = "none";
+            text.innerText = data.email;
+            text.title = data.email;
+            disconnectBtn.style.display = "inline-block";
+            showAuthGate(false);
 
         } else {
             dot.classList.add("disconnected");
-            text.innerText = `${data.configured_sender} · Not Connected`;
-            connectBtn.style.display = "inline-block";
+            text.innerText = "Gmail not connected";
+            disconnectBtn.style.display = "none";
+            showAuthGate(true);
         }
 
     } catch (error) {
 
-        console.error("Sender status error:", error);
+        console.error("Gmail status error:", error);
 
         dot.classList.add("disconnected");
-        text.innerText = "Unable to check sender status";
+        text.innerText = "Unable to check Gmail connection";
     }
 }
 
 
-async function connectSender() {
+function continueWithGoogle() {
 
-    const connectBtn = document.getElementById("connectBtn");
+    const btn = document.getElementById("googleLoginBtn");
+    btn.disabled = true;
+    btn.innerText = "Redirecting to Google...";
 
-    connectBtn.innerText = "Connecting...";
-    connectBtn.disabled = true;
+    window.location.href = "/api/auth/login";
+}
 
-    toast("Opening Google sign-in for the sender account...", "info");
+
+async function disconnectGmail() {
+
+    if (!confirm("Disconnect this Gmail account? Scheduled emails and follow-ups will fail until you reconnect.")) {
+        return;
+    }
 
     try {
 
-        const response = await fetch(
-            "/api/email/connect-sender",
-            { method: "POST" }
-        );
-
+        const response = await fetch("/api/auth/logout", { method: "POST" });
         const data = await response.json();
 
         if (!response.ok) {
-            throw new Error(extractErrorMessage(data, "Failed to connect Gmail account."));
+            throw new Error(extractErrorMessage(data, "Failed to disconnect Gmail."));
         }
 
-        toast(`Gmail account connected: ${data.sender_email}`, "success");
-
-        await refreshSenderStatus();
+        toast("Gmail disconnected.", "success");
 
     } catch (error) {
 
-        console.error("Connect sender error:", error);
+        console.error("Disconnect error:", error);
         toast(error.message, "error");
+    }
 
-    } finally {
+    await refreshSenderStatus();
+}
 
-        connectBtn.innerText = "Connect Gmail";
-        connectBtn.disabled = false;
+
+async function handleAuthRedirect() {
+
+    const params = new URLSearchParams(window.location.search);
+    const result = params.get("auth");
+
+    if (!result) {
+        return;
+    }
+
+    window.history.replaceState({}, "", window.location.pathname);
+
+    await refreshSenderStatus();
+
+    if (result === "success") {
+        toast(`Gmail connected: ${params.get("email")}`, "success");
+    } else {
+        showAuthGate(true, params.get("msg") || "Google sign-in failed.");
     }
 }
 
@@ -2031,7 +2062,7 @@ async function saveFollowupEdit() {
 
 document.addEventListener("DOMContentLoaded", () => {
 
-    refreshSenderStatus();
+    refreshSenderStatus().then(handleAuthRedirect);
     updateContextCounter();
     updatePreviewEmptyState();
 

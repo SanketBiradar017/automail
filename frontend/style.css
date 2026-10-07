@@ -1897,3 +1897,79 @@ footer {
         grid-template-columns: 1fr;
     }
 }
+
+
+/* ---------- Gmail connect gate ---------- */
+
+.connect-btn.secondary {
+    color: var(--text-muted);
+    background: transparent;
+    border: 1px solid var(--text-muted);
+}
+
+.connect-btn.secondary:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.auth-gate {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+
+    align-items: center;
+    justify-content: center;
+
+    background: rgba(8, 10, 20, 0.85);
+    backdrop-filter: blur(8px);
+}
+
+.auth-card {
+    max-width: 380px;
+    padding: 36px 32px;
+
+    text-align: center;
+
+    border-radius: 16px;
+    background: #14172a;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.auth-card h2 {
+    margin: 20px 0 8px;
+}
+
+.auth-card p {
+    margin: 0 0 24px;
+    color: var(--text-muted);
+    font-size: 14px;
+}
+
+.auth-card .logo {
+    justify-content: center;
+}
+
+.google-btn {
+    width: 100%;
+    padding: 12px 16px;
+
+    border: none;
+    border-radius: 10px;
+
+    color: #1f1f1f;
+    background: #fff;
+
+    font-size: 15px;
+    font-weight: 600;
+
+    cursor: pointer;
+}
+
+.google-btn:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.auth-card .auth-error {
+    margin: 16px 0 0;
+    color: var(--warning);
+}

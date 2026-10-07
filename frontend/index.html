@@ -45,19 +45,31 @@
         </nav>
 
         <div class="status" id="senderStatus">
-            <span id="senderDot"></span>
-            <span id="senderText">Checking sender account...</span>
+            <span id="senderDot" class="disconnected"></span>
+            <span id="senderText">Checking Gmail connection...</span>
             <button
-                id="connectBtn"
-                class="connect-btn"
-                onclick="connectSender()"
+                id="disconnectBtn"
+                class="connect-btn secondary"
+                onclick="disconnectGmail()"
                 style="display: none;"
             >
-                Connect Gmail
+                Disconnect
             </button>
         </div>
 
     </header>
+
+    <div class="auth-gate" id="authGate" style="display: none;">
+        <div class="auth-card">
+            <div class="logo"><span class="logo-mark">✦</span> AutoMail AI</div>
+            <h2>Connect your Gmail</h2>
+            <p>Sign in with Google to send, schedule and follow up on emails from your own Gmail account.</p>
+            <button id="googleLoginBtn" class="google-btn" onclick="continueWithGoogle()">
+                Continue with Google
+            </button>
+            <p class="auth-error" id="authError" style="display: none;"></p>
+        </div>
+    </div>
 
 
     <main>
@@ -65,7 +77,7 @@
         <section class="hero">
 
             <div class="badge">
-                ✦ Powered by Gemini AI
+                ✦ Your emails, on autopilot
             </div>
 
             <h1>
