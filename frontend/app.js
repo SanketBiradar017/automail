@@ -38,6 +38,12 @@ function escapeHtml(value) {
 /* ---------- Screen navigation ---------- */
 
 const SCREEN_IDS = {
+    home: "screenHome",
+    templates: "screenTemplates",
+    inbox: "screenInbox",
+    sent: "screenSent",
+    replies: "screenReplies",
+    analytics: "screenAnalytics",
     form: "screenForm",
     preview: "screenPreview",
     success: "screenSuccess",
@@ -50,6 +56,8 @@ const SCREEN_IDS = {
 let bulkEmailsList = [];
 
 
+const BARE_SCREENS = ["templates", "inbox", "sent", "replies", "analytics", "history", "schedule", "followups"];
+
 function showScreen(name) {
 
     Object.values(SCREEN_IDS).forEach(id => {
@@ -58,8 +66,17 @@ function showScreen(name) {
 
     document.getElementById(SCREEN_IDS[name]).classList.add("active");
 
-    const card = document.querySelector(".card");
-    if (card) card.classList.toggle("wide-card", name === "schedule" || name === "followups");
+    document.body.classList.toggle("tpl-screen", name === "templates");
+    document.body.classList.toggle("bare-screen", BARE_SCREENS.includes(name));
+
+    const card = document.getElementById("mainCard");
+    if (card) {
+        card.style.display = name === "home" ? "none" : "";
+        card.classList.toggle(
+            "wide-card",
+            ["schedule", "followups", "analytics", "history", "replies", "inbox", "sent", "templates"].includes(name)
+        );
+    }
 }
 
 
@@ -490,6 +507,7 @@ async function sendEmail() {
                             content_base64: att.contentBase64
                         }))
                         : null,
+                    track_opens: !!(document.getElementById("composeTrackOpens") || {}).checked,
                     enable_followup: enableFollowup,
                     followup_wait_hours: durationToHours("composeFollowupWait", "composeFollowupWaitUnit"),
                     followup_max: parseInt(document.getElementById("composeFollowupMax").value, 10) || 2,
@@ -585,16 +603,29 @@ async function refreshSenderStatus() {
         const response = await fetch("/api/auth/status");
         const data = await response.json();
 
+        const avatarEl = document.getElementById("senderAvatar");
+        const nameEl = document.getElementById("senderName");
+        const photoLink = document.getElementById("photoLink");
+
         if (data.connected) {
             dot.classList.remove("disconnected");
             text.innerText = data.email;
             text.title = data.email;
+            const shown = data.name || "";
+            nameEl.innerText = shown;
+            nameEl.style.display = shown ? "" : "none";
+            avatarEl.innerHTML = Avatar.html(data.email, "sm", shown);
+            Avatar.hydrate(avatarEl);
+            photoLink.style.display = data.sender_photos ? "none" : "";
             disconnectBtn.style.display = "inline-block";
             showAuthGate(false);
 
         } else {
             dot.classList.add("disconnected");
             text.innerText = "Gmail not connected";
+            avatarEl.innerHTML = Avatar.html("", "sm");
+            nameEl.style.display = "none";
+            photoLink.style.display = "none";
             disconnectBtn.style.display = "none";
             showAuthGate(true);
         }
@@ -924,6 +955,7 @@ async function sendBulkEmails() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     campaign_name: campaignName,
+                    track_opens: !!(document.getElementById("bulkTrackOpens") || {}).checked,
                     emails: emails,
                     attachments: bulkAttachments.length
                         ? bulkAttachments.map(att => ({
@@ -997,43 +1029,35 @@ function displayBulkResults(data) {
 
 function switchTab(tab) {
     try {
-        const navBtns = document.querySelectorAll(".nav-btn");
-        navBtns.forEach(btn => btn.classList.remove("active"));
+        document.querySelectorAll(".nav-btn").forEach(btn => {
+            btn.classList.toggle("active", btn.dataset.tab === tab);
+        });
 
-        if (tab === "compose") {
-            showScreen("form");
-            if (navBtns[0]) navBtns[0].classList.add("active");
-        } else if (tab === "bulk") {
-            showScreen("bulk");
-            if (navBtns[1]) navBtns[1].classList.add("active");
+        const screens = {
+            home: "home", compose: "form", bulk: "bulk", history: "history",
+            schedule: "schedule", followups: "followups", analytics: "analytics", replies: "replies", inbox: "inbox", sent: "sent", templates: "templates"
+        };
+        const loaders = {
+            home: () => window.refreshHomeStats && window.refreshHomeStats(),
+            bulk: resetBulkForm,
+            history: loadCampaigns,
+            schedule: () => loadSchedules(),
+            followups: () => loadFollowups(),
+            templates: () => window.loadTemplates && window.loadTemplates(),
+            inbox: () => window.loadInbox && window.loadInbox(),
+            sent: () => window.loadSent && window.loadSent(),
+            replies: () => window.loadReplyInbox && window.loadReplyInbox(),
+            analytics: () => window.loadAnalytics && window.loadAnalytics()
+        };
+
+        showScreen(screens[tab] || "home");
+        window.scrollTo({ top: 0, behavior: "smooth" });
+
+        if (loaders[tab]) {
             try {
-                resetBulkForm();
+                loaders[tab]();
             } catch (e) {
-                console.error("Error resetting bulk form:", e);
-            }
-        } else if (tab === "history") {
-            showScreen("history");
-            if (navBtns[2]) navBtns[2].classList.add("active");
-            try {
-                loadCampaigns();
-            } catch (e) {
-                console.error("Error loading campaigns:", e);
-            }
-        } else if (tab === "schedule") {
-            showScreen("schedule");
-            if (navBtns[3]) navBtns[3].classList.add("active");
-            try {
-                loadSchedules();
-            } catch (e) {
-                console.error("Error loading schedules:", e);
-            }
-        } else if (tab === "followups") {
-            showScreen("followups");
-            if (navBtns[4]) navBtns[4].classList.add("active");
-            try {
-                loadFollowups();
-            } catch (e) {
-                console.error("Error loading follow-ups:", e);
+                console.error(`Error loading ${tab}:`, e);
             }
         }
     } catch (error) {
@@ -1126,6 +1150,7 @@ function renderCampaignEmails(campaignId, emails) {
                         <p class="email-status">
                             <span class="status-badge ${email.status}">${email.status.toUpperCase()}</span>
                             ${email.sent_at ? `<span class="email-time">${formatDate(email.sent_at)}</span>` : ''}
+                            ${Ticks.html(email.tracking, { label: true })}
                         </p>
                         ${email.error ? `<p class="email-error">Error: ${escapeHtml(email.error)}</p>` : ''}
                     </div>
@@ -1133,6 +1158,7 @@ function renderCampaignEmails(campaignId, emails) {
                 </div>
                 <div class="email-content" id="content-${email.id}" style="display: none;">
                     <p class="email-content-subject"><strong>Subject:</strong> ${escapeHtml(email.subject || "(no subject)")}</p>
+                    ${email.tracking ? `<p class="email-content-subject"><strong>Status:</strong> ${Ticks.html(email.tracking, { label: true })}</p><pre class="email-content-body tick-detail">${escapeHtml(Ticks.tooltip(email.tracking))}</pre>` : ''}
                     ${email.cc ? `<p class="email-content-subject"><strong>CC:</strong> ${escapeHtml(email.cc)}</p>` : ''}
                     ${email.bcc ? `<p class="email-content-subject"><strong>BCC:</strong> ${escapeHtml(email.bcc)}</p>` : ''}
                     ${email.attachment_names && email.attachment_names.length ? `<p class="email-content-subject"><strong>Attachments:</strong> ${escapeHtml(email.attachment_names.join(", "))}</p>` : ''}
@@ -1651,7 +1677,7 @@ function scheduleCardHtml(s) {
             <div class="campaign-info">
                 <p class="campaign-subject">${escapeHtml(s.subject)} ${recurrenceLabel}</p>
                 <p class="campaign-meta">
-                    <span>To: ${escapeHtml(s.recipient_email)}</span>
+                    <span class="rp-to">To: ${Avatar.html(s.recipient_email, "sm")}${escapeHtml(s.recipient_email)}</span>
                     <span class="status-badge ${s.status}">${s.status.toUpperCase()}</span>
                 </p>
                 <p class="campaign-date">🕒 ${escapeHtml(timeLabel)} (${escapeHtml(s.timezone)})</p>
@@ -1877,6 +1903,7 @@ function renderFollowupList(followups) {
     }
 
     listEl.innerHTML = followups.map(followupCardHtml).join("");
+    followups.filter(f => f.status === "replied").forEach(loadFollowupReply);
 }
 
 
@@ -1914,14 +1941,16 @@ function followupCardHtml(f) {
             <div class="campaign-info">
                 <p class="campaign-subject">${escapeHtml(f.original_subject)}</p>
                 <p class="campaign-meta">
-                    <span>To: ${escapeHtml(f.recipient_email)}</span>
+                    <span class="rp-to">To: ${Avatar.html(f.recipient_email, "sm")}${escapeHtml(f.recipient_email)}</span>
                     <span class="status-badge ${f.status}">${f.status.toUpperCase()}</span>
+                    ${Ticks.html(f.tracking, { label: true })}
                 </p>
                 <p class="campaign-date">
                     Follow-up ${f.follow_ups_sent}/${f.max_follow_ups}
                     ${nextLabel && (f.status === "waiting" || f.status === "due") ? ` · Next: ${escapeHtml(nextLabel)}` : ""}
                 </p>
                 ${f.last_error ? `<p class="email-error">Error: ${escapeHtml(f.last_error)}</p>` : ''}
+                ${f.status === "replied" ? `<div class="fu-reply" id="fu-reply-${f.id}"><span class="fu-reply-label">↩ Reply received — follow-ups stopped</span><p class="fu-reply-body muted">Loading reply…</p></div>` : ""}
                 <div class="email-content" id="${detailsId}" style="display: none;">
                     <p class="email-content-subject"><strong>Original email:</strong></p>
                     <pre class="email-content-body">${escapeHtml(f.original_body || "(empty body)")}</pre>
@@ -1931,6 +1960,32 @@ function followupCardHtml(f) {
             <div class="campaign-actions">${actions.join("")}</div>
         </div>
     `;
+}
+
+
+async function loadFollowupReply(f) {
+    const box = document.getElementById(`fu-reply-${f.id}`);
+    if (!box) return;
+    const body = box.querySelector(".fu-reply-body");
+    try {
+        const response = await fetch(`/api/followups/${f.id}/reply`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(extractErrorMessage(data, "Could not load the reply."));
+        if (!data.replies.length) {
+            body.textContent = "No reply message found in the conversation (it may have been deleted).";
+            return;
+        }
+        box.innerHTML = '<span class="fu-reply-label">↩ Reply received — follow-ups stopped</span>' + data.replies.map(m => `
+            <div class="fu-reply-msg">
+                <div class="fu-reply-head">${Avatar.html(m.from, "sm")}<strong>${escapeHtml(m.from.replace(/<.*>/, "").replace(/"/g, "").trim() || m.from)}</strong>
+                    <span>${escapeHtml(new Date(m.date).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }))}</span></div>
+                <pre class="email-content-body">${escapeHtml(m.body || "(empty message)")}</pre>
+                ${m.attachments.length ? `<p class="muted">📎 ${m.attachments.map(escapeHtml).join(", ")}</p>` : ""}
+            </div>`).join("");
+    } catch (error) {
+        body.textContent = error.message;
+        body.classList.add("error-state");
+    }
 }
 
 
@@ -2214,14 +2269,11 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("context").addEventListener("input", updateContextCounter);
 
     // Attach nav button listeners
-    const navBtns = document.querySelectorAll(".nav-btn");
-    navBtns.forEach((btn, idx) => {
-        const tabNames = ["compose", "bulk", "history", "schedule", "followups"];
+    document.querySelectorAll(".nav-btn").forEach(btn => {
         btn.addEventListener("click", (e) => {
             e.preventDefault();
             e.stopPropagation();
-            console.log("Clicked nav button:", tabNames[idx]);
-            switchTab(tabNames[idx]);
+            switchTab(btn.dataset.tab);
         });
     });
 

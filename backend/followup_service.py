@@ -148,6 +148,8 @@ def process_followup_check(sequence_id: int):
                 body=followup_body
             )
 
+            if not seq.first_followup_at:
+                seq.first_followup_at = datetime.utcnow()
             seq.follow_ups_sent += 1
             previous.append(followup_body)
             seq.previous_followup_bodies = json.dumps(previous)

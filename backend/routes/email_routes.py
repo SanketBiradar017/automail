@@ -18,6 +18,8 @@ from backend.gmail_auth import (
 from backend.database import get_db
 from backend.models import EmailCampaign, Email
 from backend.followup_service import create_followup_sequence
+from backend import email_status
+from backend.config import TRACKING_BASE_URL
 
 
 router = APIRouter(
@@ -71,6 +73,9 @@ class EmailSendRequest(BaseModel):
     body: str
     attachments: Optional[List[AttachmentItem]] = None
 
+    # Opt-in: request a read receipt (+ tracking pixel if TRACKING_BASE_URL is set)
+    track_opens: bool = False
+
     enable_followup: bool = False
     followup_wait_hours: Optional[int] = 48
     followup_max: Optional[int] = 2
@@ -96,6 +101,7 @@ class BulkEmailSendRequest(BaseModel):
     campaign_name: str
     emails: List[BulkEmailItem]
     attachments: Optional[List[AttachmentItem]] = None
+    track_opens: bool = False
 
     @field_validator("emails")
     @classmethod
@@ -105,6 +111,13 @@ class BulkEmailSendRequest(BaseModel):
         if len(v) > 500:
             raise ValueError("Maximum 500 emails per campaign")
         return v
+
+
+def _pixel_url(email_record):
+    """Opt-in tracking pixel URL, only when the app has a public base URL."""
+    if email_record.open_tracking and email_record.track_token and TRACKING_BASE_URL:
+        return f"{TRACKING_BASE_URL}/t/{email_record.track_token}.gif"
+    return None
 
 
 @router.post("/generate")
@@ -175,7 +188,10 @@ def send(request: EmailSendRequest, db: Session = Depends(get_db)):
         ),
         subject=request.subject,
         body=request.body,
-        status="pending"
+        status="pending",
+        sender_email=get_connected_email(),
+        open_tracking=bool(request.track_opens),
+        track_token=email_status.new_track_token() if request.track_opens else None
     )
     db.add(email_record)
     db.flush()
@@ -187,7 +203,9 @@ def send(request: EmailSendRequest, db: Session = Depends(get_db)):
             body=request.body,
             cc=request.cc,
             bcc=request.bcc,
-            attachments=attachments_payload
+            attachments=attachments_payload,
+            pixel_url=_pixel_url(email_record),
+            request_receipt=bool(request.track_opens)
         )
 
     except SenderNotAuthenticatedError as exc:
@@ -206,7 +224,7 @@ def send(request: EmailSendRequest, db: Session = Depends(get_db)):
         )
 
     except HttpError as exc:
-        email_record.status = "failed"
+        email_status.mark_failed(db, email_record, str(exc))
         email_record.error_message = str(exc)
         db.commit()
         raise HTTPException(
@@ -215,7 +233,7 @@ def send(request: EmailSendRequest, db: Session = Depends(get_db)):
         )
 
     except Exception as exc:
-        email_record.status = "failed"
+        email_status.mark_failed(db, email_record, str(exc))
         email_record.error_message = str(exc)
         db.commit()
         raise HTTPException(
@@ -223,9 +241,9 @@ def send(request: EmailSendRequest, db: Session = Depends(get_db)):
             detail=f"Failed to send email: {exc}"
         )
 
-    email_record.status = "sent"
     email_record.gmail_message_id = result.get("id")
-    email_record.sent_at = datetime.utcnow()
+    email_record.thread_id = result.get("threadId")
+    email_status.mark_sent(db, email_record, datetime.utcnow())
     db.commit()
     db.refresh(email_record)
 
@@ -290,7 +308,8 @@ def send_bulk(
             emails_to_send.append({
                 "recipient": email_item.recipient,
                 "subject": email_item.subject,
-                "body": email_item.body
+                "body": email_item.body,
+                "request_receipt": bool(request.track_opens)
             })
 
             email_record = Email(
@@ -300,8 +319,12 @@ def send_bulk(
                 attachment_names=attachment_names_json,
                 subject=email_item.subject,
                 body=email_item.body,
-                status="pending"
+                status="pending",
+                sender_email=get_connected_email(),
+                open_tracking=bool(request.track_opens),
+                track_token=email_status.new_track_token() if request.track_opens else None
             )
+            emails_to_send[-1]["pixel_url"] = _pixel_url(email_record)
             email_records.append(email_record)
             db.add(email_record)
 
@@ -310,12 +333,13 @@ def send_bulk(
         results = send_bulk_emails(emails_to_send, attachments=attachments_payload)
 
         for i, result in enumerate(results):
-            email_records[i].status = result["status"]
             email_records[i].gmail_message_id = result["gmail_message_id"]
-            if result["error"]:
-                email_records[i].error_message = result["error"]
+            email_records[i].thread_id = result.get("thread_id")
             if result["status"] == "sent":
-                email_records[i].sent_at = datetime.utcnow()
+                email_status.mark_sent(db, email_records[i], datetime.utcnow())
+            else:
+                email_records[i].error_message = result["error"]
+                email_status.mark_failed(db, email_records[i], result["error"] or "")
 
         db.commit()
 
@@ -392,7 +416,8 @@ def get_campaign(campaign_id: int, db: Session = Depends(get_db)):
                     "body": e.body,
                     "status": e.status,
                     "sent_at": e.sent_at,
-                    "error": e.error_message
+                    "error": e.error_message,
+                    "tracking": email_status.status_payload(e)
                 }
                 for e in campaign.emails
             ]

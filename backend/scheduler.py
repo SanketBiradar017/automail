@@ -13,7 +13,8 @@ from apscheduler.triggers.interval import IntervalTrigger
 from backend.database import DATABASE_URL, SessionLocal
 from backend.models import ScheduledEmail, EmailCampaign, Email
 from backend.gmail_sender import send_email
-from backend.gmail_auth import SenderNotAuthenticatedError
+from backend.gmail_auth import SenderNotAuthenticatedError, get_connected_email
+from backend import email_status
 
 scheduler = BackgroundScheduler(
     jobstores={"default": SQLAlchemyJobStore(url=DATABASE_URL, tablename="apscheduler_jobs")},
@@ -24,6 +25,17 @@ scheduler = BackgroundScheduler(
 def start_scheduler():
     if not scheduler.running:
         scheduler.start()
+
+    # Periodic reply/bounce tracking for analytics. Imported lazily to avoid a
+    # circular import (analytics_service -> gmail_*).
+    from backend.analytics_service import sync_tracking
+    scheduler.add_job(
+        sync_tracking,
+        trigger=IntervalTrigger(minutes=15),
+        id="analytics-sync",
+        replace_existing=True,
+        max_instances=1
+    )
 
 
 def shutdown_scheduler():
@@ -144,7 +156,7 @@ def execute_scheduled_email(schedule_id: int):
             schedule.send_count = (schedule.send_count or 0) + 1
             schedule.last_error = None
 
-            email_record = _record_history(db, schedule)
+            email_record = _record_history(db, schedule, result.get("threadId"))
 
             if schedule.enable_followup:
                 db.flush()
@@ -189,7 +201,7 @@ def execute_scheduled_email(schedule_id: int):
         db.close()
 
 
-def _record_history(db, schedule: ScheduledEmail):
+def _record_history(db, schedule: ScheduledEmail, thread_id=None):
     campaign = EmailCampaign(
         name=f"Scheduled: {schedule.subject}"[:255],
         subject=schedule.subject,
@@ -208,9 +220,12 @@ def _record_history(db, schedule: ScheduledEmail):
         subject=schedule.subject,
         body=schedule.body,
         gmail_message_id=schedule.gmail_message_id,
+        thread_id=thread_id,
         status="sent",
-        sent_at=schedule.last_sent_at
+        sent_at=schedule.last_sent_at,
+        sender_email=get_connected_email()
     )
     db.add(email_record)
     db.flush()
+    email_status.mark_sent(db, email_record, schedule.last_sent_at)
     return email_record

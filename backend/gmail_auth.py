@@ -15,6 +15,7 @@ from googleapiclient.discovery import build
 
 from backend.config import (
     GMAIL_SCOPES,
+    OPTIONAL_GOOGLE_SCOPES,
     CLIENT_SECRET_FILE,
     GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET
@@ -109,7 +110,7 @@ _pending_lock = threading.Lock()
 def build_authorization_url(redirect_uri: str) -> str:
     flow = Flow.from_client_config(
         _client_config(),
-        scopes=GMAIL_SCOPES,
+        scopes=list(GMAIL_SCOPES) + [s for s in OPTIONAL_GOOGLE_SCOPES if s not in GMAIL_SCOPES],
         redirect_uri=redirect_uri,
         autogenerate_code_verifier=True
     )
@@ -175,13 +176,18 @@ def complete_authorization(code: str, state: str) -> str:
     creds = flow.credentials
     creds._scopes = sorted(granted)  # persist what was actually granted
 
-    email = _get_authenticated_email(creds)
-    _save_account(email, creds)
+    info = _get_userinfo(creds)
+    email = info["email"]
+    _save_account(email, creds, name=info.get("name"), picture=info.get("picture"))
 
     return email
 
 
 def _get_authenticated_email(creds) -> str:
+    return _get_userinfo(creds)["email"]
+
+
+def _get_userinfo(creds) -> dict:
     # The OpenID userinfo REST endpoint needs no per-project API enablement,
     # unlike the legacy discovery-based oauth2 v2 API.
     try:
@@ -200,19 +206,24 @@ def _get_authenticated_email(creds) -> str:
             f"Google userinfo request failed ({response.status_code}): {response.text}"
         )
 
-    email = response.json().get("email", "")
+    payload = response.json()
+    email = payload.get("email", "")
 
     if not email:
         raise GmailVerificationError(
             "Google's userinfo response did not include an email address."
         )
 
-    return email.strip().lower()
+    return {
+        "email": email.strip().lower(),
+        "name": payload.get("name"),
+        "picture": payload.get("picture")
+    }
 
 
 # ---------- Storage ----------
 
-def _save_account(email: str, creds):
+def _save_account(email: str, creds, name=None, picture=None):
     db = SessionLocal()
     try:
         existing = db.query(GmailAccount).filter(GmailAccount.email == email).first()
@@ -229,6 +240,10 @@ def _save_account(email: str, creds):
         row.refresh_token_enc = encrypt(refresh_token) if refresh_token else None
         row.token_expiry = creds.expiry
         row.scopes = " ".join(creds.scopes or GMAIL_SCOPES)
+        if name:
+            row.display_name = name
+        if picture:
+            row.picture_url = picture
         row.connected_at = datetime.utcnow() if not existing else row.connected_at
 
         db.add(row)
@@ -257,7 +272,7 @@ def _creds_from_row(row: GmailAccount) -> Credentials:
 
 # ---------- Public API ----------
 
-def get_gmail_service():
+def get_valid_credentials():
     """
     Returns (service, email) for the currently connected Gmail account.
     Expired access tokens are refreshed automatically and persisted.
@@ -307,9 +322,55 @@ def get_gmail_service():
     finally:
         db.close()
 
+    return creds, email
+
+
+def get_gmail_service():
+    """Returns (service, email); see get_valid_credentials for failure modes."""
+
+    creds, email = get_valid_credentials()
     service = build("gmail", "v1", credentials=creds, cache_discovery=False)
 
     return service, email
+
+
+def get_account_profile() -> Optional[dict]:
+    """Cached profile of the connected account (no network unless the photo
+    has never been fetched). Never includes tokens."""
+
+    db = SessionLocal()
+    try:
+        row = _load_account(db)
+        if not row:
+            return None
+        granted = _normalize_scopes(row.scopes)
+        return {
+            "email": row.email,
+            "name": row.display_name,
+            "picture": row.picture_url,
+            "scopes": granted
+        }
+    finally:
+        db.close()
+
+
+def refresh_account_profile() -> Optional[dict]:
+    """Re-reads name/photo from Google's userinfo endpoint and stores them."""
+
+    creds, email = get_valid_credentials()
+    info = _get_userinfo(creds)
+
+    db = SessionLocal()
+    try:
+        row = db.query(GmailAccount).filter(GmailAccount.email == email).first()
+        if row:
+            row.display_name = info.get("name") or row.display_name
+            row.picture_url = info.get("picture") or row.picture_url
+            db.commit()
+    finally:
+        db.close()
+
+    return get_account_profile()
 
 
 def get_connected_email() -> Optional[str]:

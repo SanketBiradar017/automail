@@ -4,6 +4,7 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
+from backend import avatar_service
 from backend.config import OAUTH_REDIRECT_URI
 from backend.gmail_auth import (
     logger,
@@ -11,9 +12,14 @@ from backend.gmail_auth import (
     complete_authorization,
     disconnect_account,
     get_sender_status,
+    get_account_profile,
+    refresh_account_profile,
     GmailVerificationError
 )
 
+
+CONTACTS_SCOPE = "https://www.googleapis.com/auth/contacts.readonly"
+OTHER_CONTACTS_SCOPE = "https://www.googleapis.com/auth/contacts.other.readonly"
 
 router = APIRouter(
     prefix="/api/auth",
@@ -26,9 +32,23 @@ def auth_status():
 
     connected, email = get_sender_status()
 
+    profile = None
+    if connected:
+        profile = get_account_profile() or {}
+        if not profile.get("picture"):
+            try:  # one-off backfill for accounts connected before avatars existed
+                profile = refresh_account_profile() or profile
+            except Exception:
+                pass
+
+    scopes = (profile or {}).get("scopes") or set()
+
     return {
         "connected": connected,
-        "email": email
+        "email": email,
+        "name": (profile or {}).get("name"),
+        "has_picture": bool((profile or {}).get("picture")),
+        "sender_photos": bool(scopes & {CONTACTS_SCOPE, OTHER_CONTACTS_SCOPE})
     }
 
 
@@ -83,6 +103,7 @@ def callback(
 def logout():
 
     removed = disconnect_account()
+    avatar_service.clear_cache()
 
     return {
         "success": True,

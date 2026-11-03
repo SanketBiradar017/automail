@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from backend.database import Base
@@ -36,7 +36,46 @@ class Email(Base):
     error_message = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    # Analytics tracking (filled by backend/analytics_service.py)
+    thread_id = Column(String(255), nullable=True)
+    replied_at = Column(DateTime, nullable=True)       # first inbound human reply, UTC
+    bounced_at = Column(DateTime, nullable=True)       # delivery-failure notice, UTC
+    bounce_reason = Column(Text, nullable=True)
+    tracked_at = Column(DateTime, nullable=True)       # last time Gmail was checked
+
+    # Status tracking (backend/email_status.py). A column is only ever set when
+    # there is evidence for it; *_source records what that evidence was.
+    sender_email = Column(String(255), nullable=True, index=True)   # connected account that sent it
+    delivered_at = Column(DateTime, nullable=True)
+    delivered_source = Column(String(30), nullable=True)   # dsn | reply | auto_reply | read_receipt | open_pixel
+    opened_at = Column(DateTime, nullable=True)
+    opened_source = Column(String(30), nullable=True)      # read_receipt | open_pixel
+    replied_source = Column(String(30), nullable=True)     # thread_sync
+    replied_message_id = Column(String(255), nullable=True)  # Gmail id of the first human reply
+    open_tracking = Column(Boolean, default=False)         # sender opted in for this email
+    track_token = Column(String(64), nullable=True, index=True)
+    status_updated_at = Column(DateTime, nullable=True)
+
     campaign = relationship("EmailCampaign", back_populates="emails")
+    events = relationship("EmailEvent", back_populates="email", cascade="all, delete-orphan")
+
+
+class EmailEvent(Base):
+    """Append-only log of status evidence. (email_id, event_type, external_id)
+    is unique, so re-syncing or retrying can never double count an event."""
+    __tablename__ = "email_events"
+    __table_args__ = (UniqueConstraint("email_id", "event_type", "external_id", name="uq_email_event"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    email_id = Column(Integer, ForeignKey("emails.id", ondelete="CASCADE"), nullable=False, index=True)
+    event_type = Column(String(20), nullable=False, index=True)   # sent failed delivered opened replied bounced
+    source = Column(String(30), nullable=False)                   # evidence source
+    external_id = Column(String(255), nullable=False, default="")  # gmail message id / token hit, for dedupe
+    occurred_at = Column(DateTime, nullable=False, index=True)    # naive UTC
+    detail = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    email = relationship("Email", back_populates="events")
 
 
 class ScheduledEmail(Base):
@@ -117,6 +156,7 @@ class FollowUpSequence(Base):
 
     job_id = Column(String(100), nullable=True)  # APScheduler job id for the next check/send
     next_action_at = Column(DateTime, nullable=True)  # UTC
+    first_followup_at = Column(DateTime, nullable=True)  # when follow-up #1 went out, UTC
     last_checked_at = Column(DateTime, nullable=True)
     last_error = Column(Text, nullable=True)
 
@@ -136,5 +176,32 @@ class GmailAccount(Base):
     refresh_token_enc = Column(Text, nullable=True)
     token_expiry = Column(DateTime, nullable=True)  # naive UTC
     scopes = Column(Text, nullable=True)  # space separated
+    display_name = Column(String(255), nullable=True)
+    picture_url = Column(Text, nullable=True)  # Google profile photo (public URL, not a secret)
     connected_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class EmailTemplate(Base):
+    """A user-created template. Built-in templates live in code
+    (backend/template_library.py) and are read-only. Ownership is the
+    connected Gmail account's address (the app's user identity)."""
+    __tablename__ = "email_templates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    owner_email = Column(String(255), nullable=False, index=True)
+    name = Column(String(120), nullable=False)
+    category = Column(String(50), nullable=False, default="Other")
+    subject = Column(String(300), nullable=False, default="")
+    body = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class TemplateFavorite(Base):
+    """Per-user favourite. `ref` is "builtin:<key>" or "custom:<id>"."""
+    __tablename__ = "template_favorites"
+
+    id = Column(Integer, primary_key=True, index=True)
+    owner_email = Column(String(255), nullable=False, index=True)
+    ref = Column(String(100), nullable=False)

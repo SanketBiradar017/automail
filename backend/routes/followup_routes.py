@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends
@@ -31,8 +31,18 @@ class FollowUpUpdateRequest(BaseModel):
     interval_hours: Optional[int] = None
 
 
-def _serialize(seq: FollowUpSequence) -> dict:
+def _tracking_for(db, seq):
+    from backend.models import Email
+    from backend import email_status
+    if not seq.source_email_id:
+        return None
+    e = db.query(Email).filter(Email.id == seq.source_email_id).first()
+    return email_status.status_payload(e) if e else None
+
+
+def _serialize(seq: FollowUpSequence, db=None) -> dict:
     return {
+        "tracking": _tracking_for(db, seq) if db is not None else None,
         "id": seq.id,
         "source_type": seq.source_type,
         "source_email_id": seq.source_email_id,
@@ -66,7 +76,49 @@ def list_followups(status: Optional[str] = None, db: Session = Depends(get_db)):
         query = query.filter(FollowUpSequence.status == status)
 
     sequences = query.order_by(FollowUpSequence.next_action_at.asc().nullslast()).all()
-    return {"success": True, "followups": [_serialize(s) for s in sequences]}
+    return {"success": True, "followups": [_serialize(s, db) for s in sequences]}
+
+
+@router.get("/{followup_id}/reply")
+def get_followup_reply(followup_id: int, db: Session = Depends(get_db)):
+    """The reply(ies) the recipient sent after the original email - i.e. what
+    stopped the follow-ups. Read live from Gmail; nothing is stored."""
+    from backend.gmail_inbox import get_thread, strip_quoted
+    from backend.gmail_auth import SenderNotAuthenticatedError
+
+    seq = db.query(FollowUpSequence).filter(FollowUpSequence.id == followup_id).first()
+    if not seq:
+        raise HTTPException(status_code=404, detail="Follow-up not found")
+
+    try:
+        thread = get_thread(seq.thread_id)
+    except SenderNotAuthenticatedError as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not read the conversation from Gmail: {exc}")
+
+    after = seq.original_sent_at.replace(tzinfo=timezone.utc) if seq.original_sent_at else None
+    replies = []
+    for m in thread["messages"]:
+        if m["is_me"]:
+            continue
+        sent = datetime.fromisoformat(m["date"].replace("Z", "+00:00"))
+        if sent.tzinfo is None:
+            sent = sent.replace(tzinfo=timezone.utc)
+        if after and sent <= after:
+            continue
+        low = (m["from"] + " " + m["subject"]).lower()
+        if any(t in low for t in ("mailer-daemon", "postmaster", "delivery status", "undeliverable")):
+            continue
+        replies.append({
+            "from": m["from"],
+            "date": m["date"],
+            "subject": m["subject"],
+            "body": strip_quoted(m["body"]) or m["body"],
+            "attachments": m["attachments"],
+        })
+
+    return {"success": True, "status": seq.status, "replies": replies}
 
 
 @router.get("/{followup_id}")
@@ -74,7 +126,7 @@ def get_followup(followup_id: int, db: Session = Depends(get_db)):
     seq = db.query(FollowUpSequence).filter(FollowUpSequence.id == followup_id).first()
     if not seq:
         raise HTTPException(status_code=404, detail="Follow-up sequence not found")
-    return {"success": True, "followup": _serialize(seq)}
+    return {"success": True, "followup": _serialize(seq, db)}
 
 
 @router.put("/{followup_id}")
@@ -105,7 +157,7 @@ def update_followup(followup_id: int, request: FollowUpUpdateRequest, db: Sessio
     db.commit()
     db.refresh(seq)
 
-    return {"success": True, "followup": _serialize(seq)}
+    return {"success": True, "followup": _serialize(seq, db)}
 
 
 @router.post("/{followup_id}/pause")
@@ -123,7 +175,7 @@ def pause_followup(followup_id: int, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(seq)
 
-    return {"success": True, "followup": _serialize(seq)}
+    return {"success": True, "followup": _serialize(seq, db)}
 
 
 @router.post("/{followup_id}/resume")
@@ -146,7 +198,7 @@ def resume_followup(followup_id: int, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(seq)
 
-    return {"success": True, "followup": _serialize(seq)}
+    return {"success": True, "followup": _serialize(seq, db)}
 
 
 @router.post("/{followup_id}/cancel")
@@ -164,7 +216,7 @@ def cancel_followup(followup_id: int, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(seq)
 
-    return {"success": True, "followup": _serialize(seq)}
+    return {"success": True, "followup": _serialize(seq, db)}
 
 
 @router.post("/{followup_id}/retry")
@@ -181,7 +233,7 @@ def retry_followup(followup_id: int, db: Session = Depends(get_db)):
     process_followup_check(seq.id)
 
     db.refresh(seq)
-    return {"success": True, "followup": _serialize(seq)}
+    return {"success": True, "followup": _serialize(seq, db)}
 
 
 @router.delete("/{followup_id}")

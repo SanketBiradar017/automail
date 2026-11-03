@@ -25,6 +25,17 @@ GMAIL_SCOPES = os.getenv(
 ).split()
 
 
+# Optional scopes: requested at sign-in for profile / sender photos, but the
+# app works without them (avatars fall back to initials). Not enforced in
+# the callback, so users can decline them on Google's granular consent screen.
+OPTIONAL_GOOGLE_SCOPES = os.getenv(
+    "OPTIONAL_GOOGLE_SCOPES",
+    "https://www.googleapis.com/auth/userinfo.profile "
+    "https://www.googleapis.com/auth/contacts.other.readonly "
+    "https://www.googleapis.com/auth/contacts.readonly"
+).split()
+
+
 # Google OAuth *app* credentials only - never a user's Gmail address.
 # Falls back to the CLIENT_SECRET_FILE download from Google Cloud Console.
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
@@ -43,3 +54,9 @@ OAUTH_REDIRECT_URI = os.getenv("OAUTH_REDIRECT_URI")
 # and kept in tokens/.encryption_key (git-ignored).
 TOKEN_ENCRYPTION_KEY = os.getenv("TOKEN_ENCRYPTION_KEY")
 TOKEN_DIRECTORY = os.getenv("TOKEN_DIRECTORY", "tokens")
+
+
+# Public base URL of this app (e.g. https://mail.example.com). Needed only for
+# the OPT-IN open-tracking pixel; without it, "track opens" falls back to a
+# read-receipt request only (no pixel is ever added).
+TRACKING_BASE_URL = (os.getenv("TRACKING_BASE_URL") or "").rstrip("/")

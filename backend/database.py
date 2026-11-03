@@ -39,7 +39,29 @@ def _migrate_add_missing_columns():
         "emails": {
             "cc": "VARCHAR(1000)",
             "bcc": "VARCHAR(1000)",
-            "attachment_names": "TEXT"
+            "attachment_names": "TEXT",
+            "thread_id": "VARCHAR(255)",
+            "replied_at": "DATETIME",
+            "bounced_at": "DATETIME",
+            "bounce_reason": "TEXT",
+            "tracked_at": "DATETIME",
+            "sender_email": "VARCHAR(255)",
+            "delivered_at": "DATETIME",
+            "delivered_source": "VARCHAR(30)",
+            "opened_at": "DATETIME",
+            "opened_source": "VARCHAR(30)",
+            "replied_source": "VARCHAR(30)",
+            "replied_message_id": "VARCHAR(255)",
+            "open_tracking": "BOOLEAN DEFAULT 0",
+            "track_token": "VARCHAR(64)",
+            "status_updated_at": "DATETIME"
+        },
+        "followup_sequences": {
+            "first_followup_at": "DATETIME"
+        },
+        "gmail_accounts": {
+            "display_name": "VARCHAR(255)",
+            "picture_url": "TEXT"
         },
         "scheduled_emails": {
             "enable_followup": "BOOLEAN",
