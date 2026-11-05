@@ -115,6 +115,12 @@ def mark_sent(db, email, when=None):
 
 def mark_failed(db, email, error: str = ""):
     email.status = "failed"
+    try:
+        from backend.admin.telemetry import notify
+        notify("email_failed", "Email send failed", error or "Gmail rejected a send request", "warning",
+               dedupe_key="email_failed", window_minutes=30)
+    except Exception:
+        pass
     return record_event(db, email, "failed", "gmail_api", datetime.utcnow(), detail=error)
 
 

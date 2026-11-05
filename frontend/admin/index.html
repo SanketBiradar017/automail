@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>AutoMail Admin</title>
+<link rel="stylesheet" href="/static/admin/admin.css?v=2">
+</head>
+<body>
+
+<section id="login" class="login" hidden>
+    <form id="loginForm" class="login-card" autocomplete="on" novalidate>
+        <div class="brand"><span class="brand-mark">✦</span> AutoMail <b>Admin</b></div>
+        <h1>Sign in</h1>
+        <p class="muted">Restricted area. Activity is logged.</p>
+        <label for="lgEmail">Email</label>
+        <input id="lgEmail" type="email" autocomplete="username" required>
+        <label for="lgPass">Password</label>
+        <input id="lgPass" type="password" autocomplete="current-password" required>
+        <p class="form-error" id="lgError" role="alert" hidden></p>
+        <button class="btn primary block" id="lgBtn" type="submit">Sign in</button>
+    </form>
+</section>
+
+<div id="app" class="app" hidden>
+    <div class="scrim" id="scrim"></div>
+    <aside class="side" id="side" aria-label="Admin navigation">
+        <div class="brand"><span class="brand-mark">✦</span> AutoMail <b>Admin</b></div>
+        <nav id="nav"></nav>
+        <div class="side-foot">
+            <div class="who"><span class="avatar" id="meAvatar"></span>
+                <div><strong id="meName"></strong><small id="meRole"></small></div></div>
+            <button class="btn ghost block" id="logoutBtn" type="button">Sign out</button>
+        </div>
+    </aside>
+
+    <div class="main">
+        <header class="top">
+            <button class="icon-btn menu-btn" id="menuBtn" type="button" aria-label="Open menu">☰</button>
+            <h2 id="pageTitle">Overview</h2>
+            <div class="top-right">
+                <div class="range" id="rangeBar" role="group" aria-label="Date range">
+                    <button type="button" data-r="today">Today</button>
+                    <button type="button" data-r="7d">7D</button>
+                    <button type="button" data-r="30d" class="on">30D</button>
+                    <button type="button" data-r="90d">90D</button>
+                    <button type="button" data-r="custom">Custom</button>
+                </div>
+                <div class="custom-range" id="customRange" hidden>
+                    <input type="date" id="rgStart" aria-label="Start date"><span>→</span>
+                    <input type="date" id="rgEnd" aria-label="End date">
+                    <button class="btn small primary" id="rgApply" type="button">Apply</button>
+                </div>
+                <div class="bell-wrap">
+                    <button class="icon-btn" id="bellBtn" type="button" aria-label="Notifications">🔔<span class="badge" id="bellBadge" hidden>0</span></button>
+                    <div class="pop" id="bellPop" hidden></div>
+                </div>
+            </div>
+        </header>
+        <main id="view" tabindex="-1"></main>
+    </div>
+</div>
+
+<div id="modal" class="modal" hidden><div class="modal-card" role="dialog" aria-modal="true" id="modalCard"></div></div>
+<div id="toasts" class="toasts" aria-live="polite"></div>
+
+<script src="/static/admin/admin.js?v=3"></script>
+</body>
+</html>

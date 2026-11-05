@@ -60,3 +60,9 @@ TOKEN_DIRECTORY = os.getenv("TOKEN_DIRECTORY", "tokens")
 # the OPT-IN open-tracking pixel; without it, "track opens" falls back to a
 # read-receipt request only (no pixel is ever added).
 TRACKING_BASE_URL = (os.getenv("TRACKING_BASE_URL") or "").rstrip("/")
+
+
+# Admin panel: AI cost *estimate* = tokens x these rates (USD per 1M tokens).
+# Set them to your Gemini model's real pricing; the panel always shows the rates used.
+AI_PRICE_INPUT_PER_M = float(os.getenv("AI_PRICE_INPUT_PER_M", "0.30"))
+AI_PRICE_OUTPUT_PER_M = float(os.getenv("AI_PRICE_OUTPUT_PER_M", "2.50"))

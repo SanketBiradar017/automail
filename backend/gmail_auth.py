@@ -178,6 +178,11 @@ def complete_authorization(code: str, state: str) -> str:
 
     info = _get_userinfo(creds)
     email = info["email"]
+
+    from backend.admin import telemetry as _tel
+    if _tel.is_suspended(email):
+        raise GmailVerificationError("This account has been suspended. Contact support.")
+    _tel.upsert_user_on_login(email, info.get("name"))
     _save_account(email, creds, name=info.get("name"), picture=info.get("picture"))
 
     return email
@@ -291,11 +296,16 @@ def get_valid_credentials():
                 "No Gmail account connected. Please connect your Gmail account."
             )
 
+        from backend.admin import telemetry as _tel
+        if _tel.is_suspended(row.email):
+            raise SenderNotAuthenticatedError("This account has been suspended. Contact support.")
+
         creds = _creds_from_row(row)
 
         if not creds.valid:
 
             if not creds.refresh_token:
+                _tel.mark_gmail_disconnected(row.email, "session expired, no refresh token")
                 db.delete(row)
                 db.commit()
                 raise SenderNotAuthenticatedError(
@@ -306,6 +316,7 @@ def get_valid_credentials():
                 creds.refresh(Request())
 
             except RefreshError as exc:
+                _tel.mark_gmail_disconnected(row.email, "access revoked or expired")
                 db.delete(row)
                 db.commit()
                 raise SenderNotAuthenticatedError(
@@ -425,8 +436,14 @@ def disconnect_account() -> bool:
         except Exception:
             pass  # still remove local access
 
+        email = row.email
         db.delete(row)
         db.commit()
+        try:
+            from backend.admin import telemetry as _tel
+            _tel.mark_gmail_disconnected(email, "user disconnected")
+        except Exception:
+            pass
         return True
 
     finally:

@@ -20,19 +20,53 @@ _NO_AFC = AutomaticFunctionCallingConfig(disable=True)
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 
-# Check API key
-if not GOOGLE_API_KEY:
-    raise ValueError(
-        "GOOGLE_API_KEY is missing. "
-        "Please add GOOGLE_API_KEY to your .env file."
-    )
+MODEL_NAME = "gemini-3.6-flash"
 
 
-# Initialize Gemini
-llm = ChatGoogleGenerativeAI(
-    model="gemini-3.6-flash",
-    google_api_key=GOOGLE_API_KEY,
-)
+def _build_llm(key):
+    return ChatGoogleGenerativeAI(model=MODEL_NAME, google_api_key=key)
+
+
+# Initialize Gemini. A missing key no longer stops the app from starting: an
+# admin can add it from the admin panel (Settings), which calls set_api_key().
+llm = _build_llm(GOOGLE_API_KEY) if GOOGLE_API_KEY else None
+
+
+def validate_key(key: str) -> None:
+    """Makes one tiny live call with a candidate key. Raises if Gemini rejects it."""
+    _build_llm(key).invoke("Reply with the single word OK.", automatic_function_calling=_NO_AFC)
+
+
+def set_api_key(key: str) -> None:
+    """Switches the running process to a new key (no restart needed)."""
+    global llm, GOOGLE_API_KEY
+    os.environ["GOOGLE_API_KEY"] = key
+    GOOGLE_API_KEY = key
+    llm = _build_llm(key)
+
+
+def _tracked_invoke(feature: str, prompt: str):
+    """llm.invoke + admin usage telemetry (tokens, latency, success). The prompt
+    and the reply are never stored - only counts."""
+    import time
+    from backend.admin.telemetry import log_ai_call
+    if llm is None:
+        raise RuntimeError("GOOGLE_API_KEY is not configured. Add it in the admin panel (Settings) or .env.")
+    started = time.perf_counter()
+    try:
+        response = llm.invoke(prompt, automatic_function_calling=_NO_AFC)
+    except Exception as exc:
+        log_ai_call(feature, getattr(llm, "model", None), None, (time.perf_counter() - started) * 1000, False, str(exc))
+        raise
+    usage = getattr(response, "usage_metadata", None) or {}
+    log_ai_call(feature, getattr(llm, "model", None), usage, (time.perf_counter() - started) * 1000, True)
+    return response
+
+
+def ping() -> dict:
+    """Tiny live call for the admin health check."""
+    _tracked_invoke("health_check", "Reply with the single word OK.")
+    return {"ok": True}
 
 
 def generate_email(
@@ -75,7 +109,7 @@ Sanket
 """
 
     try:
-        response = llm.invoke(prompt, automatic_function_calling=_NO_AFC)
+        response = _tracked_invoke("generate_email", prompt)
 
     except Exception as exc:
         raise RuntimeError(f"Gemini request failed: {exc}") from exc
@@ -147,7 +181,7 @@ Sanket
 """
 
     try:
-        response = llm.invoke(prompt, automatic_function_calling=_NO_AFC)
+        response = _tracked_invoke("generate_followup", prompt)
 
     except Exception as exc:
         raise RuntimeError(f"Gemini request failed: {exc}") from exc
@@ -210,9 +244,9 @@ def _text_of(response) -> str:
     return str(content).strip()
 
 
-def _invoke(prompt: str) -> str:
+def _invoke(prompt: str, feature: str = "other") -> str:
     try:
-        return _text_of(llm.invoke(prompt, automatic_function_calling=_NO_AFC))
+        return _text_of(_tracked_invoke(feature, prompt))
     except Exception as exc:
         raise RuntimeError(f"Gemini request failed: {exc}") from exc
 
@@ -245,7 +279,7 @@ Return ONLY a JSON object with exactly these keys:
 - "action_items": array of strings; tasks or deadlines ME has been asked to handle.
 - "sentiment": one of "positive", "neutral", "negative", "urgent".
 """
-    data = _parse_json(_invoke(prompt))
+    data = _parse_json(_invoke(prompt, "reply_analyze"))
     return {
         "summary": str(data.get("summary", "")).strip(),
         "needs_reply": bool(data.get("needs_reply", False)),
@@ -295,7 +329,7 @@ Best regards,
 - Do not add a subject line, markdown, or explanations.
 - Return ONLY the reply body.
 """
-    return _invoke(prompt)
+    return _invoke(prompt, "reply_draft")
 
 
 # ---------------------------------------------------------------------
@@ -352,7 +386,7 @@ TEMPLATE SUBJECT:
 TEMPLATE BODY:
 {body}
 """
-    raw = _invoke(prompt)
+    raw = _invoke(prompt, "template_generate")
     try:
         data = _parse_json(raw)
         out_subject = str(data.get("subject", "")).strip() or subject

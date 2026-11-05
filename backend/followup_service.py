@@ -96,6 +96,15 @@ def create_followup_sequence(
     return seq
 
 
+def _notify_followup_failed(seq_id, exc):
+    try:
+        from backend.admin.telemetry import notify
+        notify("followup_failed", "Follow-up automation failed", f"sequence #{seq_id}: {exc}", "warning",
+               dedupe_key="followup_failed", window_minutes=30)
+    except Exception:
+        pass
+
+
 def process_followup_check(sequence_id: int):
     db = SessionLocal()
     try:
@@ -113,6 +122,7 @@ def process_followup_check(sequence_id: int):
         except Exception as exc:
             seq.status = "failed"
             seq.last_error = str(exc)
+            _notify_followup_failed(seq.id, exc)
             db.commit()
             return
 
